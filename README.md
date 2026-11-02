@@ -4,7 +4,7 @@ Jogo de navegador original no estilo dos desenhos animados dos anos 1930: um *bo
 
 ## História
 
-Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram roubadas. **Fósforo**, o aprendiz do faroleiro, e sua amiga **Candela** precisam derrotar seis figurões para recuperá-las e reacender o Farol:
+Em Vila Vinil, a Chama Eterna do Farol se apagou e seis brasas mágicas foram roubadas. **Fósforo**, o aprendiz do faroleiro, e sua amiga **Candela** precisam derrotar seis figurões para recuperá-las e reacender o Farol:
 
 1. **Gramofone Gustavo**, no Salão de Música: notas musicais, discos que rolam e saltos com onda de choque.
 2. **Nuvem Nimbo**, nos Telhados: chuva, raios teleguiados, nuvenzinhas perseguidoras, granizo e ventania.
@@ -25,11 +25,24 @@ Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram r
 - **1 Jogador**: escolha Fósforo ou Candela.
 - **2 Jogadores** (cooperativo local): cada um controla um herói. Quem perder toda a vida vira fantasma; o parceiro **rebate o coração rosa** do fantasma para revivê-lo. Os chefões ficam mais resistentes.
 
+## Dificuldade
+
+Escolha na seleção de personagem (↑/↓) ou em **Opções**:
+
+| Nível | Vida | Chefões |
+|---|---|---|
+| **Fácil** | 4 PV | 28% menos vida, ataques mais espaçados e projéteis mais lentos (nota máxima B) |
+| **Normal** | 3 PV | o desafio padrão |
+| **Difícil** | 3 PV | 30% mais vida, atacam mais rápido e projéteis mais velozes |
+| **Pesadelo** | 1 PV | 45% mais vida e ainda mais agressivos |
+
+O mapa mostra a melhor nota de cada chefão e em qual dificuldade ela foi conseguida.
+
 ## Opções
 
 No título ou na pausa, em **Opções**:
 
-- Volume da música e dos efeitos, som geral, tremor de tela e efeito de filme antigo.
+- Dificuldade, volume da música e dos efeitos, som geral, tremor de tela e efeito de filme antigo.
 - **Botões de toque**: mostrar sempre, nunca ou automático; **opacidade**, **tamanho** e **posição** (modo de edição: arraste cada botão para onde quiser).
 - **Teclas**: troque qualquer tecla do modo 1 jogador e de cada jogador do modo 2 jogadores.
 
