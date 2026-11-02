@@ -59,7 +59,12 @@ python3 -m http.server 8000
 # abra http://localhost:8000
 ```
 
-Também funciona no GitHub Pages: publique a branch e use a raiz como pasta do site.
+### GitHub Pages
+
+O workflow `.github/workflows/pages.yml` publica o site a cada push na `main`.
+Endereço: https://lucc4lim4-bot.github.io/cuphead/
+
+Se for a primeira vez, ative em **Settings → Pages → Build and deployment → Source: GitHub Actions** e rode o workflow de novo (aba **Actions**).
 
 ## Estrutura
 
