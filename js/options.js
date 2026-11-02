@@ -17,6 +17,7 @@ class Options {
     const o = opt();
     const toggle = (k) => () => { o[k] = !o[k]; };
     return [
+      { label: 'Dificuldade', val: () => curDiff().name, adj: (d) => cycleDiff(d) },
       { label: 'Volume da música', val: () => volBar(o.music), adj: (d) => { o.music = clamp(o.music + d, 0, 10); Snd.applyVolume(); } },
       { label: 'Volume dos efeitos', val: () => volBar(o.sfx), adj: (d) => { o.sfx = clamp(o.sfx + d, 0, 10); Snd.applyVolume(); Snd.play('select'); } },
       { label: 'Som geral', val: () => (Save.data.muted ? 'Mudo' : 'Ligado'), adj: () => Snd.toggleMute() },
@@ -64,7 +65,7 @@ class Options {
     drawPanel('OPÇÕES', x, y, w, h);
     const it = this.items();
     it.forEach((row, i) => {
-      const yy = y + 88 + i * 27.5, sel = i === this.sel;
+      const yy = y + 86 + i * 26, sel = i === this.sel;
       if (sel) { ctx.fillStyle = 'rgba(200,53,43,.14)'; ctx.fillRect(x + 22, yy - 13, w - 44, 26); }
       ctx.font = `${sel ? 19 : 17}px ${FONT_TITLE}`; ctx.textBaseline = 'middle';
       ctx.textAlign = 'left'; ctx.fillStyle = sel ? '#c8352b' : INK; ctx.fillText((sel ? '► ' : '') + row.label, x + 34, yy);

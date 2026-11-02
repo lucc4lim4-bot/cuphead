@@ -23,9 +23,19 @@ const Save = {
   write() { try { localStorage.setItem('fosforo-save', JSON.stringify(this.data)); } catch (e) {} },
 };
 Save.load();
-const OPT_DEFAULTS = { music: 7, sfx: 8, shake: true, film: true, touch: 'auto', tOpacity: 0.55, tScale: 1, tPos: {} };
+// Níveis de dificuldade
+const DIFFS = {
+  easy: { name: 'Fácil', color: '#2f8a4a', lives: 4, hp: 0.72, cd: 1.4, speed: 0.82, maxGrade: 'B', desc: '4 PV · chefões mais fracos e lentos · nota máxima B' },
+  normal: { name: 'Normal', color: '#3a6fb0', lives: 3, hp: 1, cd: 1, speed: 1, desc: '3 PV · o desafio pensado para o jogo' },
+  hard: { name: 'Difícil', color: '#c8352b', lives: 3, hp: 1.3, cd: 0.78, speed: 1.15, desc: '3 PV · chefões mais resistentes, rápidos e agressivos' },
+  nightmare: { name: 'Pesadelo', color: '#6a2a8a', lives: 1, hp: 1.45, cd: 0.68, speed: 1.25, desc: '1 PV · um toque e acabou. Boa sorte!' },
+};
+const DIFF_ORDER = ['easy', 'normal', 'hard', 'nightmare'];
+const OPT_DEFAULTS = { diff: 'normal', music: 7, sfx: 8, shake: true, film: true, touch: 'auto', tOpacity: 0.55, tScale: 1, tPos: {} };
 Save.data.opt = Object.assign({}, OPT_DEFAULTS, Save.data.opt || {});
 const opt = () => Save.data.opt;
+const curDiff = () => DIFFS[opt().diff] || DIFFS.normal;
+function cycleDiff(d) { const i = DIFF_ORDER.indexOf(opt().diff); opt().diff = DIFF_ORDER[(Math.max(0, i) + d + DIFF_ORDER.length) % DIFF_ORDER.length]; Save.write(); }
 
 // ---------- Entrada (até 2 jogadores: teclado dividido e controles) ----------
 const keys = {}, pressed = {};                       // união de todos (usado nos menus)

@@ -143,7 +143,7 @@ class Boss {
     }
     if (this.dead) { this.deathT += dt; return false; }
     this.tickQ(dt); this.cd -= dt;
-    if (this.cd <= 0 && this.q.length === 0) { this.seq++; f.pickTarget(); this.windup = 1; this.attack(f); }
+    if (this.cd <= 0 && this.q.length === 0) { this.seq++; f.pickTarget(); this.windup = 1; this.attack(f); if (f.diff) this.cd *= f.diff.cd; }
     return true;
   }
   dangerCircles() { return []; }

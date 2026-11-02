@@ -87,10 +87,12 @@ class Fight {
     const mode = Game.mode;
     this.coop = mode.coop;
     this.boss = this.def.make();
-    if (this.coop) { this.boss.hp = this.boss.max = Math.round(this.boss.max * 1.7); }
+    this.diffId = opt().diff; this.diff = curDiff();
+    this.boss.hp = this.boss.max = Math.round(this.boss.max * this.diff.hp * (this.coop ? 1.7 : 1));
     this.players = mode.coop
       ? [new Player(0, mode.chars[0], 120), new Player(1, mode.chars[1], 210)]
       : [new Player(0, mode.chars[0], 160)];
+    for (const p of this.players) p.hp = this.diff.lives;
     this.focus = this.players[0];
     this.pb = []; this.eb = []; this.wind = 0;
     this.state = 'intro'; this.stateT = 0; this.shake = 0; this.hitstop = 0; this.t = 0;
@@ -148,7 +150,7 @@ class Fight {
 
     // projéteis inimigos
     for (const b of this.eb) {
-      updateBullet(b, dt, this);
+      updateBullet(b, dt * this.diff.speed, this);
       if (b.life <= 0 || this.state !== 'play') continue;
       for (const p of this.players) {
         if (!p.alive || b.life <= 0) continue;
@@ -179,7 +181,7 @@ class Fight {
     }
     if (this.state === 'win') {
       if (Math.random() < 0.25) { const c = boss.hurtCircles()[0] || { x: boss.x || W * 0.75, y: boss.y || 250 }; Particles.stars(c.x + rand(-80, 80), c.y + rand(-80, 80), 6, pick(['#ffd84a', '#ff9a2e', '#fff'])); if (Math.random() < 0.3) Snd.play('boom'); this.shake = 5; }
-      if (this.stateT > 3.6) Game.go(new Results(this.idx, this.stats, Math.max(...this.players.map((p) => p.hp))));
+      if (this.stateT > 3.6) Game.go(new Results(this.idx, this.stats, Math.max(...this.players.map((p) => p.hp)), this.diffId));
     }
   }
   parry(p, b) {
@@ -274,6 +276,7 @@ class Fight {
       ctx.fillStyle = `rgba(20,12,6,${Math.max(0, 0.6 - t * 0.4)})`; ctx.fillRect(0, 0, W, H);
       outlinedText(this.def.name, W / 2, 120, 44, '#ffd84a');
       ctx.font = `22px ${FONT_TEXT}`; ctx.fillStyle = CREAM; ctx.textAlign = 'center'; ctx.fillText(this.def.quote, W / 2, 168);
+      ctx.font = `20px ${FONT_TITLE}`; ctx.fillStyle = this.diff.color; ctx.lineWidth = 4; ctx.strokeStyle = CREAM; ctx.strokeText(`Dificuldade: ${this.diff.name}`, W / 2, 200); ctx.fillText(`Dificuldade: ${this.diff.name}`, W / 2, 200);
       const k = Math.min(1, t * 4);
       ctx.save(); ctx.translate(W / 2, H / 2); ctx.scale(k, k); outlinedText('PREPARE-SE...', 0, 0, 64, CREAM); ctx.restore();
     } else {
@@ -297,7 +300,7 @@ class Fight {
     for (const m of [0.34, 0.67]) { ctx.beginPath(); ctx.moveTo(bx + bw * m, by - 8); ctx.lineTo(bx + bw * m, by + 8); ctx.stroke(); }
     star(bx + bw, by, 16, '#ffd84a');
     ctx.save(); ctx.translate(bx + bw * prog * Math.min(1, (t - 0.5) * 1.5), by - 12); drawHero(this.players[0].type, 0, 22, { scale: 0.45, t: this.t }); ctx.restore();
-    ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(`Progresso: ${Math.round(prog * 100)}%`, 0, 30);
+    ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(`Progresso: ${Math.round(prog * 100)}%  ·  ${this.diff.name}`, 0, 30);
     const opts = ['Tentar de novo', 'Voltar ao mapa'];
     opts.forEach((o, i) => {
       const sel = i === this.menuSel;
@@ -348,6 +351,7 @@ class CharSelect {
   update(dt) {
     this.t += dt;
     if (pressed.left || pressed.right) { this.sel ^= 1; Snd.play('select'); }
+    if (pressed.up || pressed.down) { cycleDiff(pressed.up ? -1 : 1); Snd.play('select'); }
     if (backPressed()) { InputMode.coop = Game.mode.coop; Game.go(new Title()); return; }
     if (pressed.jump || pressed.start || pressed.shoot) {
       Snd.play('confirm');
@@ -381,30 +385,43 @@ class CharSelect {
       ctx.restore();
     });
     ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center';
-    ctx.fillText(this.coop ? '←/→ trocar quem fica com quem · Z/F/Enter confirmar · Esc voltar' : '←/→ escolher · Z/Enter confirmar · Esc voltar', W / 2, 518);
+    // dificuldade
+    const D = curDiff();
+    ink(4); rrect(W / 2 - 250, 494, 500, 34, 10, '#fff6e0');
+    ctx.font = `20px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = D.color;
+    ctx.fillText(`▲  Dificuldade: ${D.name}  ▼`, W / 2, 504);
+    ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(D.desc, W / 2, 520);
+    ctx.font = `13px ${FONT_TEXT}`; ctx.fillStyle = INK;
+    ctx.fillText(this.coop ? '←/→ trocar heróis · ↑/↓ dificuldade · Z/F/Enter confirmar · Esc voltar' : '←/→ herói · ↑/↓ dificuldade · Z/Enter confirmar · Esc voltar', W / 2, 536);
   }
 }
 
 // ---------- Cena: Resultado ----------
-function computeGrade(stats, hp, idx) {
-  const par = BOSSES[idx].par || 120;
+function computeGrade(stats, hp, idx, diffId = 'normal') {
+  const par = BOSSES[idx].par || 120, D = DIFFS[diffId] || DIFFS.normal;
+  hp = Math.min(3, hp * (3 / Math.min(3, D.lives)));
   let s = 0;
   s += stats.time <= par * 0.65 ? 30 : stats.time <= par ? 22 : stats.time <= par * 1.5 ? 12 : 5;
   s += hp * 10;
   s += Math.min(stats.parries, 3) * 7;
   s += Math.min(stats.meterUsed, 6) * 3.2;
   const table = [[96, 'S'], [88, 'A+'], [80, 'A'], [74, 'A-'], [68, 'B+'], [60, 'B'], [54, 'B-'], [48, 'C+'], [40, 'C'], [0, 'D']];
-  return { score: s, grade: table.find(([m]) => s >= m)[1] };
+  let grade = table.find(([m]) => s >= m)[1];
+  if (D.maxGrade && GRADE_ORDER.indexOf(grade) > GRADE_ORDER.indexOf(D.maxGrade)) grade = D.maxGrade;
+  return { score: s, grade };
 }
 const GRADE_ORDER = ['D', 'C', 'C+', 'B-', 'B', 'B+', 'A-', 'A', 'A+', 'S'];
 
 class Results {
-  constructor(idx, stats, hp) {
-    this.idx = idx; this.stats = stats; this.hp = hp; this.t = 0;
-    this.res = computeGrade(stats, hp, idx);
+  constructor(idx, stats, hp, diffId = 'normal') {
+    this.idx = idx; this.stats = stats; this.hp = hp; this.t = 0; this.diffId = diffId; this.diff = DIFFS[diffId] || DIFFS.normal;
+    this.res = computeGrade(stats, hp, idx, diffId);
     const id = BOSSES[idx].id, old = Save.data.grades[id];
-    this.newBest = !old || GRADE_ORDER.indexOf(this.res.grade) > GRADE_ORDER.indexOf(old);
-    if (this.newBest) { Save.data.grades[id] = this.res.grade; Save.write(); }
+    const gd = Save.data.gradeDiff || (Save.data.gradeDiff = {});
+    const better = !old || GRADE_ORDER.indexOf(this.res.grade) > GRADE_ORDER.indexOf(old)
+      || (this.res.grade === old && DIFF_ORDER.indexOf(diffId) > DIFF_ORDER.indexOf(gd[id] || 'normal'));
+    this.newBest = better;
+    if (better) { Save.data.grades[id] = this.res.grade; gd[id] = diffId; Save.write(); }
     Music.play('map');
   }
   update(dt) {
@@ -420,8 +437,9 @@ class Results {
     ink(6); rrect(150, 50, 660, 440, 18, PAPER);
     outlinedText('RESULTADO', W / 2, 100, 52, '#ffd84a');
     ctx.font = `20px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText(`${BOSSES[this.idx].name} foi derrotado e a brasa foi recuperada!`, W / 2, 145);
+    ctx.font = `17px ${FONT_TITLE}`; ctx.fillStyle = this.diff.color; ctx.fillText(`Dificuldade: ${this.diff.name}`, 690, 182);
     const mm = Math.floor(this.stats.time / 60), ss = Math.floor(this.stats.time % 60).toString().padStart(2, '0');
-    const rows = [['Tempo', `${mm}:${ss}`], ['Vida restante', `${this.hp} / 3`], ['Rebotes', `${Math.min(this.stats.parries, 3)} / 3`], ['Chamas gastas', `${Math.min(this.stats.meterUsed, 6)} / 6`]];
+    const rows = [['Tempo', `${mm}:${ss}`], ['Vida restante', `${this.hp} / ${this.diff.lives}`], ['Rebotes', `${Math.min(this.stats.parries, 3)} / 3`], ['Chamas gastas', `${Math.min(this.stats.meterUsed, 6)} / 6`]];
     rows.forEach(([k, v], i) => {
       const show = this.t > 0.3 + i * 0.3;
       if (!show) return;
@@ -645,7 +663,7 @@ class MapScene {
         ink(4); rrect(-46, -44, 92, 70, 8, sel ? '#fff6e0' : PAPER);
         ctx.font = `15px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(BOSSES[i].short, 0, -28);
         const g = Save.data.grades[BOSSES[i].id];
-        if (g) { ctx.font = `26px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.fillText(g, 0, 2); } else { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.6)'; ctx.fillText('???', 0, 2); }
+        if (g) { ctx.font = `24px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.fillText(g, 0, -2); const gd = DIFFS[(Save.data.gradeDiff || {})[BOSSES[i].id] || 'normal']; ctx.font = `11px ${FONT_TEXT}`; ctx.fillStyle = gd.color; ctx.fillText(gd.name, 0, 16); } else { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.6)'; ctx.fillText('???', 0, 2); }
       } else {
         ctx.translate(0, 40); ctx.scale(0.33, 0.33); drawLighthouse(0, 40, done, this.t);
       }
@@ -662,5 +680,7 @@ class MapScene {
     const brasas = BOSSES.filter((b) => Save.data.grades[b.id]).length;
     ink(4); rrect(20, 92, 150, 34, 8, PAPER);
     ctx.font = `18px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.fillStyle = INK; ctx.fillText(`Brasas: ${brasas} / ${N}`, 95, 110);
+    const D = curDiff(); ink(4); rrect(180, 92, 200, 34, 8, PAPER);
+    ctx.font = `16px ${FONT_TITLE}`; ctx.fillStyle = D.color; ctx.fillText(`Dificuldade: ${D.name}`, 280, 110);
   }
 }
