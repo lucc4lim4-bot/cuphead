@@ -1,6 +1,8 @@
 'use strict';
 // ===== Projéteis inimigos e os três chefões =====
 
+const BULLET_ART = {}; // artes extras registradas por outros arquivos
+
 function makeBullet(o) {
   return Object.assign({ x: 0, y: 0, vx: 0, vy: 0, ay: 0, r: 12, pink: false, life: 12, t: 0, kind: 'ball', rot: 0 }, o);
 }
@@ -108,7 +110,7 @@ function drawBullet(b) {
       circle(-3, -4, 2.5, ctx.fillStyle, false); circle(4, 3, 2, ctx.fillStyle, false);
       break;
     }
-    default: circle(0, 0, b.r, pinkOr('#f0d060'));
+    default: if (BULLET_ART[b.kind]) BULLET_ART[b.kind](b, pinkOr); else circle(0, 0, b.r, pinkOr('#f0d060'));
   }
   ctx.restore();
 }
@@ -354,7 +356,7 @@ class ClockKing extends Boss {
 }
 
 const BOSSES = [
-  { id: 'gramofone', make: () => new Gramophone(), name: 'Gramofone Gustavo', place: 'Salão de Música Vinil', song: 'boss1', bg: 'hall', quote: '"Quem não dança, rola!"' },
-  { id: 'nimbo', make: () => new Nimbo(), name: 'Nuvem Nimbo', place: 'Telhados da Vila', song: 'boss2', bg: 'roofs', quote: '"Hoje a previsão é de TEMPESTADE!"' },
-  { id: 'relogio', make: () => new ClockKing(), name: 'Rei Relógio', place: 'Torre do Relógio', song: 'boss3', bg: 'tower', quote: '"Seu tempo acabou, palitinho!"' },
+  { id: 'gramofone', make: () => new Gramophone(), name: 'Gramofone Gustavo', place: 'Salão de Música Vinil', song: 'boss1', bg: 'hall', par: 110, short: 'Salão', quote: '"Quem não dança, rola!"' },
+  { id: 'nimbo', make: () => new Nimbo(), name: 'Nuvem Nimbo', place: 'Telhados da Vila', song: 'boss2', bg: 'roofs', par: 120, short: 'Telhados', quote: '"Hoje a previsão é de TEMPESTADE!"' },
+  { id: 'relogio', make: () => new ClockKing(), name: 'Rei Relógio', place: 'Torre do Relógio', song: 'boss3', bg: 'tower', par: 135, arenaR: 620, short: 'Torre', quote: '"Seu tempo acabou, palitinho!"' },
 ];

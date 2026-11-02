@@ -4,11 +4,14 @@ Jogo de navegador original no estilo dos desenhos animados dos anos 1930: um *bo
 
 ## História
 
-Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram roubadas. **Fósforo**, o aprendiz do faroleiro, e sua amiga **Candela** precisam derrotar três figurões para recuperá-las e reacender o Farol:
+Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram roubadas. **Fósforo**, o aprendiz do faroleiro, e sua amiga **Candela** precisam derrotar seis figurões para recuperá-las e reacender o Farol:
 
 1. **Gramofone Gustavo**, no Salão de Música: notas musicais, discos que rolam e saltos com onda de choque.
 2. **Nuvem Nimbo**, nos Telhados: chuva, raios teleguiados, nuvenzinhas perseguidoras, granizo e ventania.
 3. **Rei Relógio**, na Torre: engrenagens, espirais de ponteiros, um pêndulo gigante e o cuco que joga ovos.
+4. **Pianão Pafúncio**, no Teatro: chuva de teclas (ache o vão), aviões de partitura teleguiados, martelos que saltam do chão e fileiras de teclas para pular ou agachar.
+5. **Mestre Cartola**, no Circo: cartas em leque, coelhos saltitantes, revoada de pombas, teletransporte, estrelas teleguiadas e uma cartola que suga você.
+6. **Locomotiva Lola**, na Estação: anéis de fumaça, carvão que vira brasas, jatos de vapor do chão, rodas soltas e vagões desgovernados.
 
 ## Personagens
 
@@ -21,6 +24,14 @@ Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram r
 
 - **1 Jogador**: escolha Fósforo ou Candela.
 - **2 Jogadores** (cooperativo local): cada um controla um herói. Quem perder toda a vida vira fantasma; o parceiro **rebate o coração rosa** do fantasma para revivê-lo. Os chefões ficam mais resistentes.
+
+## Opções
+
+No título ou na pausa, em **Opções**:
+
+- Volume da música e dos efeitos, som geral, tremor de tela e efeito de filme antigo.
+- **Botões de toque**: mostrar sempre, nunca ou automático; **opacidade**, **tamanho** e **posição** (modo de edição: arraste cada botão para onde quiser).
+- **Teclas**: troque qualquer tecla do modo 1 jogador e de cada jogador do modo 2 jogadores.
 
 ## Controles
 
@@ -75,6 +86,8 @@ Se for a primeira vez, ative em **Settings → Pages → Build and deployment �
 - `js/art.js`: desenho dos heróis (Fósforo e Candela)
 - `js/player.js`: heróis jogáveis (movimento, armas, dash, rebote, EX, Super e reviver)
 - `js/bosses.js`: projéteis e comportamento dos três chefões
-- `js/boss-art.js`: desenho detalhado dos chefões
+- `js/boss-art.js`: desenho detalhado dos chefões 1 a 3
+- `js/bosses2.js`: chefões 4 a 6 (comportamento, arte e cenários)
+- `js/options.js`: telas de opções e de troca de teclas
 - `js/scenes.js`: cenários, luta, título, seleção de personagem, história, mapa e resultados
 - `js/main.js`: laço principal e transições

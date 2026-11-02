@@ -12,13 +12,18 @@ const Snd = {
       const lp = this.ac.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3800;
       const hp = this.ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 120;
       this.master.connect(lp); lp.connect(hp); hp.connect(this.ac.destination);
-      this.sfxBus = this.ac.createGain(); this.sfxBus.gain.value = 0.7; this.sfxBus.connect(this.master);
-      this.musicBus = this.ac.createGain(); this.musicBus.gain.value = 0.32; this.musicBus.connect(this.master);
+      this.sfxBus = this.ac.createGain(); this.sfxBus.connect(this.master);
+      this.musicBus = this.ac.createGain(); this.applyVolume(); this.musicBus.connect(this.master);
       const len = this.ac.sampleRate * 0.5;
       this.noiseBuf = this.ac.createBuffer(1, len, this.ac.sampleRate);
       const d = this.noiseBuf.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
       Music.start();
     } catch (e) { this.ac = null; }
+  },
+  applyVolume() {
+    if (!this.ac) return;
+    this.sfxBus.gain.value = 0.0875 * opt().sfx;
+    this.musicBus.gain.value = 0.045 * opt().music;
   },
   toggleMute() {
     Save.data.muted = !Save.data.muted; Save.write();
@@ -62,6 +67,9 @@ const Snd = {
       case 'honk': this.tone(180, 0.25, 'sawtooth', 0.12, 60); this.tone(240, 0.25, 'square', 0.06, 60); break;
       case 'cuckoo': this.tone(780, 0.15, 'sine', 0.15); this.tone(620, 0.2, 'sine', 0.15, 0, 0.18); break;
       case 'revive': [660, 880, 1100].forEach((f, i) => this.tone(f, 0.18, 'square', 0.09, 0, i * 0.07)); break;
+      case 'whistle': this.tone(880, 0.6, 'square', 0.08, 40); this.tone(1100, 0.6, 'square', 0.06, 40); this.noise(0.6, 0.12, 3000); break;
+      case 'poof': this.noise(0.3, 0.25, 1200); this.tone(500, 0.2, 'sine', 0.1, 400); break;
+      case 'chord': [262, 330, 392].forEach((f) => this.tone(f * rand(0.98, 1.02), 0.4, 'triangle', 0.09)); break;
       case 'win': [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.35, 'square', 0.1, 0, i * 0.12)); break;
       case 'lose': [392, 370, 349, 262].forEach((f, i) => this.tone(f, 0.4, 'triangle', 0.15, 0, i * 0.22)); break;
     }
@@ -77,6 +85,9 @@ const SONGS = {
   boss1: { bpm: 176, prog: [[57, 'min'], [57, 'min'], [62, 'min'], [64, 'dom'], [57, 'min'], [53, 'dom'], [64, 'dom'], [64, 'dom']], seed: 21, lead: 'square' },
   boss2: { bpm: 164, prog: [[62, 'min'], [58, 'dom'], [57, 'dom'], [62, 'min'], [55, 'min'], [57, 'dom'], [62, 'min'], [57, 'dom']], seed: 44, lead: 'sawtooth' },
   boss3: { bpm: 188, prog: [[59, 'min'], [55, 'dom'], [52, 'min'], [54, 'dom'], [59, 'min'], [52, 'min'], [54, 'dom'], [54, 'dim']], seed: 77, lead: 'square' },
+  boss4: { bpm: 168, prog: [[60, 'maj'], [57, 'm7'], [62, 'm7'], [55, 'dom'], [60, 'maj'], [64, 'dom'], [57, 'min'], [55, 'dom']], seed: 101, lead: 'triangle' },
+  boss5: { bpm: 158, prog: [[62, 'min'], [62, 'min'], [55, 'min'], [57, 'dom'], [58, 'maj'], [55, 'min'], [57, 'dom'], [57, 'dom']], seed: 131, lead: 'square' },
+  boss6: { bpm: 196, prog: [[55, 'maj'], [55, 'maj'], [60, 'maj'], [62, 'dom'], [55, 'maj'], [52, 'min'], [57, 'dom'], [62, 'dom']], seed: 171, lead: 'sawtooth' },
   ending: { bpm: 110, prog: [[60, 'maj'], [64, 'm7'], [65, 'maj'], [67, 'dom']], seed: 5, lead: 'triangle' },
 };
 const Music = {

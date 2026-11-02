@@ -88,11 +88,15 @@ class Player {
     }
 
     this.x += this.vx * dt + (f.wind || 0) * dt; this.y += this.vy * dt;
-    this.x = clamp(this.x, 22, W - 22);
+    this.x = clamp(this.x, 22, (f.arenaR || W) - 22);
     if (this.y >= GY) {
       if (!this.onGround) { this.land = 1; Particles.puff(this.x, GY - 4, 3, 9); }
       this.y = GY; this.vy = 0; this.onGround = true; this.parryUsed = false; this.airDashUsed = false; this.jumpHeld = false;
     } else this.onGround = false;
+    if (this.onGround && Math.abs(this.vx) > 10 && this.dashT <= 0) {
+      this.dustT = (this.dustT || 0) - dt;
+      if (this.dustT <= 0) { this.dustT = 0.16; Particles.add({ kind: 'puff', x: this.x - this.facing * 10, y: GY - 4, vx: -this.facing * 40, vy: -20, life: 0.35, size: 5, color: '#f4e7c5' }); }
+    }
 
     // ---- Tiro ----
     this.shooting = I.shoot && this.dashT <= 0;
@@ -161,7 +165,7 @@ class Player {
     drawHero(this.type, this.x, this.y, {
       facing: this.facing, aim: this.aim, run: this.onGround && Math.abs(this.vx) > 10, air: !this.onGround,
       duck: this.duck, t: this.anim, land: this.land, dash: this.dashT > 0, shooting: this.shooting || this.exT > 0,
-      parry: this.parryT > 0, hurt: this.hurtT > 0, superT: this.superT,
+      parry: this.parryT > 0, hurt: this.hurtT > 0, superT: this.superT, vx: this.vx, dance: this.victory && this.onGround,
     });
     if (this.superT > 0) this.drawSuper();
   }
