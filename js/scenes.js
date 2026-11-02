@@ -83,18 +83,29 @@ function buildBackgrounds() {
 class Fight {
   constructor(idx) {
     this.idx = idx; this.def = BOSSES[idx];
-    this.boss = this.def.make(); this.player = new Player();
+    const mode = Game.mode;
+    this.coop = mode.coop;
+    this.boss = this.def.make();
+    if (this.coop) { this.boss.hp = this.boss.max = Math.round(this.boss.max * 1.7); }
+    this.players = mode.coop
+      ? [new Player(0, mode.chars[0], 120), new Player(1, mode.chars[1], 210)]
+      : [new Player(0, mode.chars[0], 160)];
+    this.focus = this.players[0];
     this.pb = []; this.eb = []; this.wind = 0;
     this.state = 'intro'; this.stateT = 0; this.shake = 0; this.hitstop = 0; this.t = 0;
     this.stats = { time: 0, parries: 0, meterUsed: 0 };
     this.menuSel = 0; this.paused = false;
     Particles.clear(); Music.play(this.def.song);
   }
+  // alvo atual dos ataques do chefão (sempre um jogador vivo)
+  get player() { return this.focus && this.focus.alive ? this.focus : (this.players.find((p) => p.alive) || this.players[0]); }
+  pickTarget() { const alive = this.players.filter((p) => p.alive); if (alive.length) this.focus = pick(alive); }
   targets() { return [this.boss, ...this.eb.filter((b) => b.shootable).map((b) => ({ hurtCircles: () => [b], damage: (n) => this.hitMinion(b, n) }))]; }
   hitMinion(b, n) { b.hp -= n; if (b.hp <= 0 && b.life > 0) { b.life = 0; Particles.puff(b.x, b.y, 5, 14, '#d8d2c4'); Snd.play('boom'); } }
   win() {
     this.state = 'win'; this.stateT = 0; this.hitstop = 0.3; this.shake = 20;
     this.eb = []; Snd.play('win'); Music.stop();
+    for (const p of this.players) if (p.ghost) p.revive();
   }
   update(dt) {
     if (this.paused) return this.updatePause();
@@ -102,16 +113,17 @@ class Fight {
     if (this.hitstop > 0) { this.hitstop -= dt; return; }
     this.t += dt; this.stateT += dt;
     this.shake = Math.max(0, this.shake - dt * 40);
-    const p = this.player, boss = this.boss;
+    const boss = this.boss;
     Particles.update(dt);
 
-    if (this.state === 'intro') { boss.t += dt; if (this.stateT > 2.3) { this.state = 'play'; this.stateT = 0; } return; }
+    if (this.state === 'intro') { boss.t += dt; for (const p of this.players) p.anim += dt; if (this.stateT > 2.3) { this.state = 'play'; this.stateT = 0; } return; }
     if (this.state === 'dead') { this.updateDeath(); return; }
 
-    if (this.state === 'play') { this.stats.time += dt; p.update(dt, this); }
+    if (this.state === 'play') { this.stats.time += dt; for (const p of this.players) p.update(dt, this); }
+    else for (const p of this.players) p.anim += dt;
     boss.update(dt, this);
 
-    // tiros do jogador
+    // tiros dos jogadores
     for (const b of this.pb) {
       b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
       if (b.x < -40 || b.x > W + 40 || b.y < -40 || b.y > H + 40) b.life = 0;
@@ -119,39 +131,54 @@ class Fight {
       for (const tg of this.targets()) {
         const hit = tg.hurtCircles().some((c) => (c.x - b.x) ** 2 + (c.y - b.y) ** 2 < (c.r + b.r) ** 2);
         if (hit) {
-          tg.damage(b.dmg, this); b.life = 0; if (p.superT <= 0) p.meter = Math.min(5, p.meter + (b.kind === 'ember' ? 0 : 0.012));
-          if (b.kind === 'ember') { Particles.stars(b.x, b.y, 10, '#ff9a2e'); Snd.play('boom'); this.shake = 6; } else { Particles.stars(b.x, b.y, 1); Snd.play('hit'); }
+          tg.damage(b.dmg, this); b.life = 0;
+          const o = b.from; if (o && o.superT <= 0 && b.kind !== 'ember') o.meter = Math.min(5, o.meter + 0.012 * b.dmg);
+          if (b.kind === 'ember') { Particles.stars(b.x, b.y, 10, HEROES[b.hero].flame[1]); Snd.play('boom'); this.shake = 6; } else { Particles.stars(b.x, b.y, 1, b.kind === 'wax' ? '#bfe3ff' : '#ffd84a'); Snd.play('hit'); }
           break;
         }
       }
-      if (b.kind === 'ember' && Math.random() < 0.6) Particles.puff(b.x, b.y, 1, 8, '#ffb347');
+      if (b.kind === 'ember' && Math.random() < 0.6) Particles.puff(b.x, b.y, 1, 8, HEROES[b.hero].flame[1]);
     }
     this.pb = this.pb.filter((b) => b.life > 0);
 
     // projéteis inimigos
-    const box = p.box();
     for (const b of this.eb) {
       updateBullet(b, dt, this);
       if (b.life <= 0 || this.state !== 'play') continue;
-      if (b.pink && p.parryT > 0 && circRect(b.x, b.y, b.r + 16, box.x, box.y - 10, box.w, box.h + 10)) { this.parry(b); continue; }
-      if (bulletHits(b, box)) p.hurt(this);
+      for (const p of this.players) {
+        if (!p.alive || b.life <= 0) continue;
+        const box = p.box();
+        if (b.pink && p.parryT > 0 && circRect(b.x, b.y, b.r + 16, box.x, box.y - 10, box.w, box.h + 10)) { this.parry(p, b); continue; }
+        if (bulletHits(b, box)) p.hurt(this);
+      }
     }
     this.eb = this.eb.filter((b) => b.life > 0);
-    // contato com o chefão
-    if (this.state === 'play') for (const c of boss.dangerCircles()) if (circRect(c.x, c.y, c.r, box.x, box.y, box.w, box.h)) p.hurt(this);
+    if (this.state === 'play') for (const p of this.players) {
+      if (!p.alive) continue;
+      const box = p.box();
+      // contato com o chefão
+      for (const c of boss.dangerCircles()) if (circRect(c.x, c.y, c.r, box.x, box.y, box.w, box.h)) p.hurt(this);
+      // reviver o parceiro: rebater o coração rosa do fantasma
+      for (const g of this.players) if (g.ghost && !g.gone && p.parryT > 0) {
+        const h = g.heartPos();
+        if (circRect(h.x, h.y, 30, box.x, box.y - 10, box.w, box.h + 10)) {
+          g.revive(); p.vy = -560; p.parryT = 0; p.parryUsed = false; p.jumpHeld = false;
+          this.hitstop = 0.12; Snd.play('revive'); Particles.stars(h.x, h.y, 12, PINK);
+          Particles.add({ kind: 'text', text: 'REVIVEU!', x: h.x, y: h.y - 20, vy: -40, life: 1.2, size: 28, color: PINK });
+        }
+      }
+    }
 
-    if (this.state === 'play' && p.hp <= 0) {
+    if (this.state === 'play' && !this.players.some((p) => p.alive)) {
       this.state = 'dead'; this.stateT = 0; this.menuSel = 0; Snd.play('lose'); Music.stop();
-      Particles.puff(p.x, p.y - 30, 8, 18);
     }
     if (this.state === 'win') {
       if (Math.random() < 0.25) { const c = boss.hurtCircles()[0]; Particles.stars(c.x + rand(-80, 80), c.y + rand(-80, 80), 6, pick(['#ffd84a', '#ff9a2e', '#fff'])); if (Math.random() < 0.3) Snd.play('boom'); this.shake = 5; }
-      if (this.stateT > 3.6) Game.go(new Results(this.idx, this.stats, p.hp));
+      if (this.stateT > 3.6) Game.go(new Results(this.idx, this.stats, Math.max(...this.players.map((p) => p.hp))));
     }
   }
-  parry(b) {
-    const p = this.player;
-    if (b.shootable) b.life = 0; else b.life = 0;
+  parry(p, b) {
+    b.life = 0;
     p.vy = -560; p.parryT = 0; p.parryUsed = false; p.jumpHeld = false;
     p.meter = Math.min(5, p.meter + 1); this.stats.parries++;
     this.hitstop = 0.1; Snd.play('parry'); Particles.stars(b.x, b.y, 8, PINK);
@@ -179,7 +206,7 @@ class Fight {
     ctx.drawImage(BG[this.def.bg], -20, -20, W + 40, H + 40);
     this.boss.draw();
     for (const b of this.pb) drawPlayerBullet(b, this.t);
-    if (this.state !== 'dead' || this.stateT < 0.4) this.player.draw();
+    for (const p of this.players) p.draw();
     for (const b of this.eb) drawBullet(b);
     Particles.draw();
     if (this.wind) { ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2; for (let i = 0; i < 8; i++) { const y = (i * 67 + this.t * 40) % GY, x = ((this.t * this.wind * 4 + i * 173) % (W + 200) + W + 200) % (W + 200) - 100; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x - Math.sign(this.wind) * 80, y); ctx.stroke(); } }
@@ -196,22 +223,33 @@ class Fight {
     if (this.paused) this.drawPause();
   }
   drawHUD() {
-    const p = this.player;
-    // cartão de vida
-    const low = p.hp <= 1 && Math.floor(this.t * 4) % 2;
-    ink(4); rrect(18, H - 52, 86, 36, 6, low ? '#c8352b' : CREAM);
-    ctx.font = `20px ${FONT_TITLE}`; ctx.fillStyle = low ? CREAM : INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(p.hp > 0 ? `PV ${p.hp}` : 'FIM', 61, H - 33);
-    // medidor de chamas (5 cartas)
-    for (let i = 0; i < 5; i++) {
-      const fill = clamp(p.meter - i, 0, 1), x = 116 + i * 24, y = H - 52;
-      const full = fill >= 1;
-      ctx.save(); ctx.translate(x + 10, y + 18); if (full) ctx.rotate(Math.sin(this.t * 6 + i) * 0.08 + (p.meter >= 5 ? Math.sin(this.t * 20) * 0.1 : 0));
-      ink(3); rrect(-10, -16, 20, 32, 3, '#3a2a1e');
-      if (fill > 0) { ctx.fillStyle = full ? '#ff9a2e' : '#a86a2a'; ctx.fillRect(-8, 14 - 28 * fill, 16, 28 * fill); }
-      if (full) { ctx.fillStyle = '#fff1a8'; ctx.beginPath(); ctx.moveTo(0, -9); ctx.quadraticCurveTo(7, 2, 0, 8); ctx.quadraticCurveTo(-7, 2, 0, -9); ctx.fill(); }
+    this.players.forEach((p, i) => {
+      const right = i === 1, x0 = right ? W - 18 - 222 : 18, y0 = H - 54;
+      ctx.save(); ctx.translate(x0, y0);
+      // retrato
+      ink(3.5); circle(19, 18, 19, p.type === 'candela' ? '#cfe2f6' : '#f3d2c8');
+      ctx.save(); ctx.beginPath(); ctx.arc(19, 18, 17, 0, TAU); ctx.clip();
+      drawHero(p.type, 17, p.type === 'candela' ? 86 : 96, { scale: p.type === 'candela' ? 0.95 : 1, t: this.t, hurt: !p.alive });
+      ctx.restore(); ink(3.5); circle(19, 18, 19, null);
+      // cartão de vida
+      const low = p.hp === 1 && Math.floor(this.t * 4) % 2;
+      ink(4); rrect(44, 2, 74, 34, 6, !p.alive ? '#6b5a4a' : low ? '#c8352b' : CREAM);
+      ctx.font = `19px ${FONT_TITLE}`; ctx.fillStyle = low || !p.alive ? CREAM : INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(p.alive ? `PV ${p.hp}` : (p.ghost && !p.gone ? 'AJUDA!' : 'FIM'), 81, 20);
+      // medidor de chamas (5 cartas)
+      const pal = HEROES[p.type].flame;
+      for (let k = 0; k < 5; k++) {
+        const fill = clamp(p.meter - k, 0, 1), full = fill >= 1;
+        ctx.save(); ctx.translate(134 + k * 21, 19);
+        if (full) ctx.rotate(Math.sin(this.t * 6 + k) * 0.08 + (p.meter >= 5 ? Math.sin(this.t * 20) * 0.1 : 0));
+        ink(3); rrect(-9, -15, 18, 30, 3, '#3a2a1e');
+        if (fill > 0) { ctx.fillStyle = full ? pal[1] : 'rgba(168,106,42,.9)'; ctx.fillRect(-7, 13 - 26 * fill, 14, 26 * fill); }
+        if (full) { ctx.fillStyle = pal[2]; ctx.beginPath(); ctx.moveTo(0, -8); ctx.quadraticCurveTo(6, 2, 0, 7); ctx.quadraticCurveTo(-6, 2, 0, -8); ctx.fill(); }
+        ctx.restore();
+      }
+      if (this.coop) { ctx.font = `14px ${FONT_TITLE}`; ctx.fillStyle = CREAM; ctx.textAlign = 'left'; ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeText(`J${i + 1}`, 0, -6); ctx.fillText(`J${i + 1}`, 0, -6); }
       ctx.restore();
-    }
+    });
   }
   drawIntro() {
     const t = this.stateT;
@@ -241,7 +279,7 @@ class Fight {
     ink(4); ctx.beginPath(); ctx.moveTo(bx, by); ctx.lineTo(bx + bw, by); ctx.stroke();
     for (const m of [0.34, 0.67]) { ctx.beginPath(); ctx.moveTo(bx + bw * m, by - 8); ctx.lineTo(bx + bw * m, by + 8); ctx.stroke(); }
     star(bx + bw, by, 16, '#ffd84a');
-    ctx.save(); ctx.translate(bx + bw * prog * Math.min(1, (t - 0.5) * 1.5), by - 12); drawFosforo(0, 22, { scale: 0.45, t: this.t }); ctx.restore();
+    ctx.save(); ctx.translate(bx + bw * prog * Math.min(1, (t - 0.5) * 1.5), by - 12); drawHero(this.players[0].type, 0, 22, { scale: 0.45, t: this.t }); ctx.restore();
     ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(`Progresso: ${Math.round(prog * 100)}%`, 0, 30);
     const opts = ['Tentar de novo', 'Voltar ao mapa'];
     opts.forEach((o, i) => {
@@ -264,18 +302,70 @@ class Fight {
 }
 
 function drawPlayerBullet(b, t) {
+  const pal = HEROES[b.hero || 'fosforo'].flame;
   ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(Math.atan2(b.vy, b.vx));
   if (b.kind === 'ember') {
     const s = 1 + Math.sin(t * 40) * 0.08; ctx.scale(s, s);
     ink(4); ctx.beginPath(); ctx.moveTo(-50, 0); ctx.quadraticCurveTo(-10, -30, 20, -22); ctx.arc(0, 0, 24, -1.2, 1.2); ctx.quadraticCurveTo(-10, 30, -50, 0);
-    ctx.fillStyle = '#e2471f'; ctx.fill(); ctx.stroke();
-    circle(4, 0, 14, '#ffb347', false); circle(8, 0, 7, '#fff1a8', false);
+    ctx.fillStyle = pal[0]; ctx.fill(); ctx.stroke();
+    circle(4, 0, 14, pal[1], false); circle(8, 0, 7, pal[2], false); shine(10, -6, 4, 2, 0, 0.8);
+  } else if (b.kind === 'wax') {
+    ctx.beginPath(); ctx.moveTo(-16, 0); ctx.quadraticCurveTo(-2, -8, 6, -7); ctx.arc(6, 0, 7, -Math.PI / 2, Math.PI / 2); ctx.quadraticCurveTo(-2, 8, -16, 0);
+    ctx.fillStyle = '#8fc6f2'; ctx.fill(); ink(2.5); ctx.stroke();
+    shine(5, -3, 3, 1.6, 0, 0.85);
   } else {
     ctx.beginPath(); ctx.moveTo(-22, 0); ctx.quadraticCurveTo(-4, -8, 8, -6); ctx.arc(8, 0, 6, -Math.PI / 2, Math.PI / 2); ctx.quadraticCurveTo(-4, 8, -22, 0);
-    ctx.fillStyle = '#ff8a1e'; ctx.fill(); ink(2.5); ctx.stroke();
-    circle(6, 0, 3.5, '#fff1a8', false);
+    ctx.fillStyle = pal[1]; ctx.fill(); ink(2.5); ctx.stroke();
+    circle(6, 0, 3.5, pal[2], false);
   }
   ctx.restore();
+}
+
+// ---------- Cena: Seleção de personagem ----------
+class CharSelect {
+  constructor(coop) {
+    this.coop = coop; this.t = 0;
+    this.sel = Game.mode.chars[0] === 'candela' ? 1 : 0; // escolha do J1 (o J2 fica com o outro)
+    InputMode.coop = coop;
+  }
+  update(dt) {
+    this.t += dt;
+    if (pressed.left || pressed.right) { this.sel ^= 1; Snd.play('select'); }
+    if (backPressed()) { InputMode.coop = Game.mode.coop; Game.go(new Title()); return; }
+    if (pressed.jump || pressed.start || pressed.shoot) {
+      Snd.play('confirm');
+      const ids = ['fosforo', 'candela'];
+      Game.mode = { coop: this.coop, chars: this.coop ? [ids[this.sel], ids[this.sel ^ 1]] : [ids[this.sel]] };
+      InputMode.coop = this.coop;
+      Game.go(Save.data.seenIntro ? new MapScene(0) : new Story(STORY_INTRO, () => { Save.data.seenIntro = true; Save.write(); Game.go(new MapScene(0)); }));
+    }
+  }
+  draw() {
+    sunburst(W / 2, H / 2, this.t * 0.12, '#c98a3a', '#d9a04e', 26);
+    outlinedText(this.coop ? 'ESCOLHAM SEUS HERÓIS' : 'ESCOLHA SEU HERÓI', W / 2, 52, 44, '#ffd84a');
+    ['fosforo', 'candela'].forEach((id, i) => {
+      const Hh = HEROES[id], cx = 260 + i * 440, chosen = i === this.sel;
+      ctx.save(); ctx.translate(cx, 290);
+      const sc = chosen ? 1.04 + Math.sin(this.t * 5) * 0.015 : 0.94; ctx.scale(sc, sc); ctx.rotate(i ? 0.02 : -0.02);
+      ink(6); rrect(-185, -200, 370, 400, 18, chosen ? '#fff6e0' : '#cdb98e');
+      ctx.strokeStyle = 'rgba(80,50,20,.4)'; ctx.lineWidth = 2; rrect(-172, -187, 344, 374, 12, null);
+      // palco do retrato
+      ctx.save(); ctx.beginPath(); ctx.ellipse(0, -55, 130, 120, 0, 0, TAU); ctx.clip();
+      ctx.fillStyle = i ? '#b9d4ee' : '#f0c4a8'; ctx.fillRect(-140, -180, 280, 260);
+      ctx.fillStyle = 'rgba(255,255,255,.35)'; for (let k = 0; k < 12; k++) { const a = this.t * 0.3 + k * TAU / 12; ctx.beginPath(); ctx.moveTo(0, 30); ctx.arc(0, 30, 300, a, a + 0.13); ctx.fill(); }
+      ctx.restore(); ink(5); ellipse(0, -55, 130, 120, 0, null);
+      drawHero(id, 0, 50, { scale: 2.1, dance: chosen, t: this.t + i, shooting: false });
+      outlinedText(Hh.name, 0, 86, 40, i ? '#8fc6f2' : '#ff8a5a');
+      ctx.font = `17px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText(Hh.tag, 0, 116);
+      ctx.font = `19px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.fillText(`Arma: ${Hh.weapon}`, 0, 142);
+      textBlock(Hh.desc, 0, 154, 320, 19, 15, INK, 'center');
+      if (this.coop) { const tag = chosen ? 'J1' : 'J2'; ink(4); circle(-150, -165, 26, chosen ? '#c8352b' : '#3a7bd5'); outlinedText(tag, -150, -164, 22, CREAM); }
+      else if (chosen) { star(-150, -165, 24, '#ffd84a'); }
+      ctx.restore();
+    });
+    ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center';
+    ctx.fillText(this.coop ? '←/→ trocar quem fica com quem · Z/F/Enter confirmar · Esc voltar' : '←/→ escolher · Z/Enter confirmar · Esc voltar', W / 2, 518);
+  }
 }
 
 // ---------- Cena: Resultado ----------
@@ -331,65 +421,88 @@ class Results {
       ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('NOTA', 690, 375);
       if (this.newBest) { ctx.fillStyle = '#c8352b'; ctx.fillText('★ novo recorde! ★', 690, 400); }
     }
-    drawFosforo(310, 450, { dance: true, t: this.t, scale: 0.9 });
+    Game.mode.chars.forEach((c, i) => drawHero(c, 280 + i * 70, 450, { dance: true, t: this.t + i * 0.4, scale: 0.9, facing: i ? -1 : 1 }));
     if (this.t > 1 && Math.floor(this.t * 2) % 2) { ctx.font = `20px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('Pressione Z para continuar', W / 2, 465); }
   }
 }
 
 // ---------- Cena: Tela título ----------
 class Title {
-  constructor() { this.t = 0; this.sel = 0; this.help = false; Music.play('title'); }
+  constructor() { this.t = 0; this.sel = 0; this.help = false; this.helpPage = 0; Music.play('title'); InputMode.coop = false; }
   update(dt) {
     this.t += dt;
-    if (this.help) { if (pressed.jump || pressed.start || backPressed()) { this.help = false; Snd.play('select'); } return; }
-    if (pressed.up) { this.sel = (this.sel + 2) % 3; Snd.play('select'); }
-    if (pressed.down) { this.sel = (this.sel + 1) % 3; Snd.play('select'); }
+    if (this.help) {
+      if (pressed.left || pressed.right) { this.helpPage ^= 1; Snd.play('select'); }
+      else if (pressed.jump || pressed.start || backPressed()) { this.help = false; Snd.play('select'); }
+      return;
+    }
+    const n = 4;
+    if (pressed.up) { this.sel = (this.sel + n - 1) % n; Snd.play('select'); }
+    if (pressed.down) { this.sel = (this.sel + 1) % n; Snd.play('select'); }
     if (pressed.mute) Snd.toggleMute();
     if (pressed.jump || pressed.start) {
       Snd.play('confirm');
-      if (this.sel === 0) Game.go(Save.data.seenIntro ? new MapScene(0) : new Story(STORY_INTRO, () => { Save.data.seenIntro = true; Save.write(); Game.go(new MapScene(0)); }));
-      else if (this.sel === 1) this.help = true;
+      if (this.sel === 0) Game.go(new CharSelect(false));
+      else if (this.sel === 1) Game.go(new CharSelect(true));
+      else if (this.sel === 2) { this.help = true; this.helpPage = 0; }
       else Snd.toggleMute();
     }
   }
   draw() {
     sunburst(W / 2, 250, this.t * 0.12, '#d79a45', '#e8b762', 28);
     // logotipo
-    ctx.save(); ctx.translate(W / 2, 110); ctx.rotate(-0.03 + Math.sin(this.t * 2) * 0.01);
-    outlinedText('FÓSFORO', 0, 0, 92, '#c8352b', FONT_TITLE, 'center', 16);
-    outlinedText('e a Chama Perdida', 0, 70, 38, '#ffd84a', FONT_TITLE, 'center', 9);
+    ctx.save(); ctx.translate(W / 2, 92); ctx.rotate(-0.03 + Math.sin(this.t * 2) * 0.01);
+    ctx.font = `78px ${FONT_TITLE}`;
+    const w1 = ctx.measureText('FÓSFORO ').width, w2 = ctx.measureText('& ').width, w3 = ctx.measureText('CANDELA').width, x0 = -(w1 + w2 + w3) / 2;
+    outlinedText('FÓSFORO', x0, 0, 78, '#c8352b', FONT_TITLE, 'left', 14);
+    outlinedText('&', x0 + w1, 0, 78, '#ffd84a', FONT_TITLE, 'left', 14);
+    outlinedText('CANDELA', x0 + w1 + w2, 0, 78, '#8fc6f2', FONT_TITLE, 'left', 14);
+    outlinedText('e a Chama Perdida', 0, 68, 36, '#ffd84a', FONT_TITLE, 'center', 9);
     ctx.restore();
-    drawFosforo(250, 450, { dance: true, t: this.t, scale: 2.2 });
+        ctx.save(); ctx.beginPath(); ctx.ellipse(215, 462, 70, 12, 0, 0, TAU); ctx.ellipse(400, 462, 60, 11, 0, 0, TAU); ctx.fillStyle = 'rgba(60,30,10,.3)'; ctx.fill(); ctx.restore();
+    drawHero('fosforo', 210, 462, { dance: true, t: this.t, scale: 2.1 });
+    drawHero('candela', 400, 462, { dance: true, t: this.t + 0.45, scale: 1.9, facing: -1 });
     // menu
-    const opts = ['Começar', 'Como jogar', Save.data.muted ? 'Som: desligado' : 'Som: ligado'];
-    ink(5); rrect(560, 270, 300, 190, 14, PAPER);
+    const opts = ['1 Jogador', '2 Jogadores', 'Como jogar', Save.data.muted ? 'Som: desligado' : 'Som: ligado'];
+    ink(5); rrect(570, 230, 300, 240, 14, PAPER);
     opts.forEach((o, i) => {
       const sel = i === this.sel;
-      ctx.font = `${sel ? 30 : 25}px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.fillStyle = sel ? '#c8352b' : 'rgba(26,20,16,.65)';
-      ctx.fillText((sel ? '► ' : '') + o, 710, 315 + i * 55);
+      ctx.font = `${sel ? 29 : 24}px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.fillStyle = sel ? '#c8352b' : 'rgba(26,20,16,.65)';
+      ctx.fillText((sel ? '► ' : '') + o, 720, 275 + i * 52);
     });
-    ctx.font = `15px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('↑/↓ escolher · Z ou Enter confirmar', 710, 490);
+    ctx.font = `15px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('↑/↓ escolher · Z ou Enter confirmar', 720, 498);
     if (this.help) this.drawHelp();
   }
   drawHelp() {
     ctx.fillStyle = 'rgba(15,8,4,.6)'; ctx.fillRect(0, 0, W, H);
-    ink(6); rrect(110, 40, 740, 460, 16, PAPER);
-    outlinedText('COMO JOGAR', W / 2, 85, 42, '#ffd84a');
-    const lines = [
+    ink(6); rrect(70, 30, 820, 480, 16, PAPER);
+    outlinedText(this.helpPage ? 'COMO JOGAR · 2 JOGADORES' : 'COMO JOGAR · 1 JOGADOR', W / 2, 72, 36, '#ffd84a');
+    const solo = [
       ['Setas / WASD', 'Andar, mirar (cima, diagonais) e agachar'],
       ['Z / Espaço', 'Pular (segure para ir mais alto)'],
       ['Z no ar', 'REBOTE: toque em objetos ROSA para quicar e ganhar 1 chama'],
-      ['X', 'Atirar faíscas (segure)'],
+      ['X', 'Atirar (segure)'],
       ['C', 'Dash rápido (também no ar)'],
       ['V', 'Golpe EX (1 chama) · SUPER Labareda (5 chamas)'],
       ['Shift', 'Travar posição para mirar em 8 direções'],
       ['Esc / P', 'Pausar · M liga/desliga o som'],
     ];
+    const coop = [
+      ['Jogador 1', 'WASD mover · F/Espaço pular · G atirar · H dash · R EX · Q travar'],
+      ['Jogador 2', 'Setas mover · Num1 pular · Num2 atirar · Num3 dash · Num0 EX'],
+      ['J2 (sem numpad)', ', pular · . atirar · / dash · L EX · Shift-dir. travar'],
+      ['Controles', 'Controle 1 = J1, Controle 2 = J2 (A pular, X atirar, RB dash, B EX)'],
+      ['Fantasma', 'Quem cair vira fantasma: o parceiro REBATE o coração rosa para reviver'],
+      ['Chefões', 'Ficam mais resistentes no modo de 2 jogadores'],
+    ];
+    const lines = this.helpPage ? coop : solo;
     lines.forEach(([k, v], i) => {
-      ctx.font = `20px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.textAlign = 'right'; ctx.fillText(k, 330, 140 + i * 40);
-      ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(v, 350, 140 + i * 40);
+      ctx.font = `19px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.textAlign = 'right'; ctx.fillText(k, 285, 130 + i * 44);
+      ctx.font = `17px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(v, 302, 130 + i * 44);
     });
-    ctx.font = `16px ${FONT_TEXT}`; ctx.textAlign = 'center'; ctx.fillText('Acertar o chefão também enche as chamas. Pressione Z para voltar.', W / 2, 470);
+    ctx.font = `16px ${FONT_TEXT}`; ctx.textAlign = 'center';
+    ctx.fillText('Fósforo: tiro reto e longo · Candela: leque de cera, forte de perto', W / 2, 455);
+    ctx.fillText('←/→ trocar página · Z para voltar', W / 2, 484);
   }
 }
 
@@ -397,11 +510,11 @@ class Title {
 const STORY_INTRO = [
   { art: 'lit', text: 'Em Vila Vinil, toda noite o grande Farol acendia a Chama Eterna — e a cidade inteira dançava até o amanhecer.' },
   { art: 'dark', text: 'Mas, numa noite sem lua, a chama se apagou! Três brasas mágicas foram surrupiadas por três figurões encrenqueiros.' },
-  { art: 'hero', text: 'O pequeno Fósforo, aprendiz do faroleiro, riscou a cabeça na parede e decidiu: "Eu vou trazer essas brasas de volta!"' },
-  { art: 'villains', text: 'Gramofone Gustavo, Nuvem Nimbo e o Rei Relógio esperam por ele. Derrote-os, recupere as brasas e reacenda o Farol!' },
+  { art: 'hero', text: 'O pequeno Fósforo, aprendiz do faroleiro, riscou a cabeça na parede. Sua melhor amiga, a velinha Candela, acendeu o pavio: "Vamos trazer essas brasas de volta!"' },
+  { art: 'villains', text: 'Gramofone Gustavo, Nuvem Nimbo e o Rei Relógio esperam pela dupla. Derrote-os, recupere as brasas e reacenda o Farol!' },
 ];
 const STORY_END = [
-  { art: 'hero', text: 'Com as três brasas nas mãos, Fósforo subiu os trezentos degraus do Farol, um por um...' },
+  { art: 'hero', text: 'Com as três brasas nas mãos, Fósforo e Candela subiram os trezentos degraus do Farol, um por um...' },
   { art: 'lit', text: '...e a Chama Eterna voltou a brilhar! Vila Vinil dançou por sete noites seguidas — até o Rei Relógio perdeu a hora.' },
   { art: 'end', text: 'FIM. Obrigado por jogar! Tente conseguir nota S contra todos os chefões.' },
 ];
@@ -447,13 +560,13 @@ function drawStoryArt(art, t) {
   ctx.fillStyle = dark ? '#1c1a24' : '#8f5a35';
   for (let i = 0; i < 9; i++) { const x = 110 + i * 85, h = 50 + ((i * 37) % 40); ink(3); ctx.fillRect(x, 340 - h, 70, h); ctx.strokeRect(x, 340 - h, 70, h); ctx.beginPath(); ctx.moveTo(x - 5, 340 - h); ctx.lineTo(x + 35, 310 - h); ctx.lineTo(x + 75, 340 - h); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.fillStyle = dark ? '#1c1a24' : '#8f5a35'; }
   if (art === 'lit' || art === 'dark') drawLighthouse(480, 330, art === 'lit', t);
-  if (art === 'hero') { drawLighthouse(760, 330, false, t); drawFosforo(380, 335, { dance: true, t, scale: 2.4 }); }
+  if (art === 'hero') { drawLighthouse(760, 330, false, t); drawHero('fosforo', 330, 335, { dance: true, t, scale: 2.3 }); drawHero('candela', 500, 335, { dance: true, t: t + 0.4, scale: 2.1, facing: -1 }); }
   if (art === 'villains') {
     ctx.save(); ctx.translate(250, 330); ctx.scale(0.55, 0.55); const g = new Gramophone(); g.t = t; g.x = 0; g.y = 0; g.draw(); ctx.restore();
     ctx.save(); ctx.translate(480, 170); ctx.scale(0.6, 0.6); const n = new Nimbo(); n.t = t; n.x = 0; n.y = 0; n.phase = 2; n.draw(); ctx.restore();
     ctx.save(); ctx.translate(720, 200); ctx.scale(0.5, 0.5); const c = new ClockKing(); c.t = t; c.x = 0; c.y = 0; c.hand = t; c.draw(); ctx.restore();
   }
-  if (art === 'end') { drawLighthouse(300, 330, true, t); drawFosforo(600, 335, { dance: true, t, scale: 2.2 }); outlinedText('FIM', 600, 130, 72, '#ffd84a'); }
+  if (art === 'end') { drawLighthouse(300, 330, true, t); drawHero('fosforo', 540, 335, { dance: true, t, scale: 2.1 }); drawHero('candela', 680, 335, { dance: true, t: t + 0.4, scale: 1.9, facing: -1 }); outlinedText('FIM', 600, 130, 72, '#ffd84a'); }
 }
 function sunburstClip(cx, cy, t) {
   ctx.fillStyle = '#f0c878';
@@ -472,6 +585,7 @@ class MapScene {
     if (pressed.left || pressed.up) { if (this.sel > 0) { this.sel--; Snd.play('select'); } }
     const n = NODES[this.sel]; this.px = lerp(this.px, n.x, dt * 8); this.py = lerp(this.py, n.y, dt * 8);
     if (backPressed()) { Game.go(new Title()); return; }
+    InputMode.coop = Game.mode.coop;
     if (pressed.jump || pressed.start) {
       Snd.play('confirm');
       if (this.sel < 3) Game.go(new Fight(this.sel));
@@ -508,7 +622,7 @@ class MapScene {
       }
       ctx.restore();
     });
-    drawFosforo(this.px, this.py + 62, { dance: true, t: this.t, scale: 0.8 });
+    Game.mode.chars.forEach((c, i) => drawHero(c, this.px + (Game.mode.chars.length > 1 ? (i ? 16 : -16) : 0), this.py + 62, { dance: true, t: this.t + i * 0.4, scale: 0.8, facing: i ? -1 : 1 }));
     // painel de informações
     ink(5); rrect(20, 18, 920, 62, 12, PAPER);
     const info = this.sel < 3 ? `${BOSSES[this.sel].place} — ${BOSSES[this.sel].name}` : (done ? 'O Farol — leve as brasas para casa!' : 'O Farol (derrote os três chefões)');

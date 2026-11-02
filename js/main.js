@@ -2,6 +2,7 @@
 // ===== Laço principal =====
 const Game = {
   scene: null,
+  mode: { coop: false, chars: ['fosforo'] },
   fade: 0, next: null,
   go(scene) { this.next = scene; this.fade = 0.0001; },
   start() {
@@ -18,6 +19,7 @@ const Game = {
     requestAnimationFrame(frame);
   },
   tick(dt) {
+    Pads.poll();
     if (this.fade > 0) {
       // transição em "íris" estilo desenho antigo
       this.fade += dt * 3;
@@ -25,7 +27,7 @@ const Game = {
       if (this.fade >= 2) this.fade = 0;
     } else this.scene.update(dt);
     if (pressed.mute && !(this.scene instanceof Title)) Snd.toggleMute();
-    for (const k in pressed) pressed[k] = false;
+    clearPressed();
   },
   render() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);

@@ -133,10 +133,15 @@ class Boss {
     if (this.hp <= 0) { this.hp = 0; this.dead = true; this.q = []; f.win(); }
   }
   baseUpdate(dt, f) {
-    this.t += dt; this.flash -= dt;
+    this.t += dt; this.flash -= dt; this.windup = Math.max(0, (this.windup || 0) - dt * 2.5);
+    const tp = f.player;
+    if (tp) {
+      this.lookX = lerp(this.lookX || 0, clamp((tp.x - this.x) / 220, -1, 1), dt * 5);
+      this.lookY = lerp(this.lookY || 0, clamp((tp.y - 50 - this.y) / 220, -1, 1), dt * 5);
+    }
     if (this.dead) { this.deathT += dt; return false; }
     this.tickQ(dt); this.cd -= dt;
-    if (this.cd <= 0 && this.q.length === 0) { this.seq++; this.attack(f); }
+    if (this.cd <= 0 && this.q.length === 0) { this.seq++; f.pickTarget(); this.windup = 1; this.attack(f); }
     return true;
   }
   dangerCircles() { return []; }
@@ -210,51 +215,6 @@ class Gramophone extends Boss {
       upd: (b, dt) => { b.vy += b.ay * dt; b.x += b.vx * dt; b.y += b.vy * dt; if (b.y > GY - b.r) { b.y = GY - b.r; if (b.ay) b.vy = -520; } },
     }));
   }
-  draw() {
-    ctx.save();
-    const sq = 1 + Math.sin(this.t * 7) * 0.025 + this.mouth * 0.04;
-    ctx.translate(this.x, this.y + this.yoff); ctx.scale(-this.face, 1); ctx.scale(1 / sq, sq);
-    if (this.dead) ctx.translate(rand(-5, 5), rand(-3, 3));
-    const flash = this.flash > 0;
-    // pernas
-    const step = Math.sin(this.t * 7) * 4;
-    hose(-45, -22, -55, -4 + step, 6); hose(45, -22, 52, -4 - step, -6);
-    shoe(-58, 0, -1, 11); shoe(56, 0, -1, 11);
-    // caixa de madeira
-    ink(5); rrect(-88, -138, 176, 118, 14, flash ? '#b8784a' : '#8f4f2a');
-    ctx.fillStyle = 'rgba(0,0,0,.15)'; ctx.fillRect(-84, -50, 168, 26);
-    ink(3); rrect(-78, -128, 156, 98, 10, null);
-    // rosto
-    const look = -1, blink = (this.t % 4) > 3.85 ? 1 : 0;
-    pieEye(-40, -96, 15, 19, look, 0, blink); pieEye(2, -96, 15, 19, look, 0, blink);
-    ink(5); ctx.beginPath(); ctx.moveTo(-60, -124); ctx.lineTo(-24, -114); ctx.moveTo(20, -124); ctx.lineTo(-14, -114); ctx.stroke();
-    const mo = 6 + this.mouth * 16 + (this.dead ? 14 : 0);
-    ink(4); ellipse(-20, -58, 30, mo, 0, '#3b120c');
-    ctx.fillStyle = '#fffaf0'; ctx.fillRect(-38, -58 - mo + 3, 36, 6);
-    // prato giratório
-    ink(4); ellipse(0, -142, 74, 15, 0, '#1b1511');
-    ctx.save(); ctx.beginPath(); ctx.ellipse(0, -142, 70, 12, 0, 0, TAU); ctx.clip();
-    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 3; const ra = this.t * 5;
-    ctx.beginPath(); ctx.moveTo(Math.cos(ra) * 60, -142 + Math.sin(ra) * 10); ctx.lineTo(Math.cos(ra) * 25, -142 + Math.sin(ra) * 4); ctx.stroke(); ctx.restore();
-    ink(3); ellipse(0, -142, 16, 4, 0, '#c8352b');
-    // braço da agulha e corneta
-    ink(5); ctx.beginPath(); ctx.moveTo(40, -146); ctx.quadraticCurveTo(60, -200, 0, -205); ctx.lineWidth = 10; ctx.stroke();
-    ctx.lineWidth = 5; ctx.strokeStyle = flash ? '#f5d58a' : '#d9a441'; ctx.stroke();
-    const flare = 1 + this.mouth * 0.15;
-    ink(5); ctx.beginPath();
-    ctx.moveTo(4, -214); ctx.quadraticCurveTo(-50, -222, -98, -248 - 62 * flare);
-    ctx.lineTo(-98, -248 + 62 * flare); ctx.quadraticCurveTo(-50, -200, 4, -196); ctx.closePath();
-    ctx.fillStyle = flash ? '#f5d58a' : '#d9a441'; ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = 'rgba(120,70,10,.5)'; ctx.lineWidth = 2;
-    for (const k of [-0.5, 0, 0.5]) { ctx.beginPath(); ctx.moveTo(0, -205); ctx.quadraticCurveTo(-50, -212 + k * 20, -96, -248 + k * 100 * flare); ctx.stroke(); }
-    ink(5); ellipse(-98, -248, 20, 62 * flare, 0, '#4a2a12');
-    ellipse(-98, -248, 10, 40 * flare, 0, '#1a0e06', false);
-    // braços de mangueira segurando a corneta
-    hose(-80, -100, -110, -150 + Math.sin(this.t * 7) * 6, 10);
-    glove(-110, -152 + Math.sin(this.t * 7) * 6, 11);
-    hose(80, -100, 100, -60, -10); glove(100, -58, 11);
-    ctx.restore();
-  }
 }
 
 // ====================== CHEFÃO 2: Nuvem Nimbo ======================
@@ -326,34 +286,6 @@ class Nimbo extends Boss {
       }
     });
   }
-  draw() {
-    ctx.save(); ctx.translate(this.x, this.y);
-    if (this.dead) { ctx.translate(rand(-5, 5), rand(-3, 3)); ctx.rotate(Math.sin(this.t * 20) * 0.05); }
-    const s = 1 + Math.sin(this.t * 3) * 0.03 + this.puff * 0.08; ctx.scale(s, 1 / s);
-    const flash = this.flash > 0;
-    const angry = this.phase >= 2;
-    const col = flash ? '#f2eee6' : this.phase === 3 ? '#8d8a86' : this.phase === 2 ? '#b2ada4' : '#d9d3c6';
-    const puffs = [[-95, 15, 48], [-55, -30, 55], [5, -50, 62], [65, -28, 54], [100, 15, 46], [50, 40, 50], [-40, 42, 50]];
-    ink(6); for (const [x, y, r] of puffs) circle(x, y, r + Math.sin(this.t * 4 + x) * 2, null);
-    ctx.fillStyle = col; ctx.beginPath(); for (const [x, y, r] of puffs) { ctx.moveTo(x + r, y); ctx.arc(x, y, r + Math.sin(this.t * 4 + x) * 2, 0, TAU); } ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.45)'; circle(-50, -45, 18, ctx.fillStyle, false); circle(-20, -62, 10, ctx.fillStyle, false);
-    // braços de mangueira
-    const wv = Math.sin(this.t * 6) * 10;
-    hose(-110, 20, -150, 60 + wv, 12); glove(-152, 62 + wv, 13);
-    hose(110, 20, 150, 60 - wv, -12); glove(152, 62 - wv, 13);
-    // rosto
-    const blink = (this.t % 3.6) > 3.45 ? 1 : 0;
-    pieEye(-30, -6, 17, 22, 0, 1, blink); pieEye(26, -6, 17, 22, 0, 1, blink);
-    ink(6); ctx.beginPath();
-    if (angry) { ctx.moveTo(-55, -40); ctx.lineTo(-12, -24); ctx.moveTo(50, -40); ctx.lineTo(8, -24); }
-    else { ctx.moveTo(-50, -38); ctx.quadraticCurveTo(-30, -48, -12, -36); ctx.moveTo(46, -38); ctx.quadraticCurveTo(26, -48, 8, -36); }
-    ctx.stroke();
-    // bochechas e boca
-    if (this.puff > 0.2) { ink(4); ellipse(0, 38, 12, 10, 0, '#3b2a3a'); circle(-58, 22, 14 * this.puff + 4, '#e8a0a0'); circle(54, 22, 14 * this.puff + 4, '#e8a0a0'); }
-    else { ink(4); ctx.beginPath(); if (angry) { ctx.moveTo(-26, 40); ctx.quadraticCurveTo(0, 26, 26, 40); } else { ctx.moveTo(-24, 30); ctx.quadraticCurveTo(0, 48, 24, 30); } ctx.stroke(); }
-    if (this.dead) { ctx.font = `30px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.fillText('x', -38, -6); ctx.fillText('x', 18, -6); }
-    ctx.restore();
-  }
 }
 
 // ====================== CHEFÃO 3: Rei Relógio ======================
@@ -413,67 +345,11 @@ class ClockKing extends Boss {
   cuckoo(f) {
     this.door = 1; this.after(0.3, () => Snd.play('cuckoo'));
     for (let i = 0; i < 3; i++) this.after(0.45 + i * 0.4, () => {
-      const sx = this.x, sy = this.y - 150, T = 1.05, g = 950;
+      const sx = this.x + 112, sy = this.y - 96, T = 1.05, g = 950;
       const tx = f.player.x + rand(-40, 40) + (i - 1) * 60, ty = GY - 15;
       f.eb.push(makeBullet({ kind: 'egg', x: sx, y: sy, r: 13, vx: (tx - sx) / T, vy: (ty - sy - 0.5 * g * T * T) / T, ay: g, pink: i === 1,
         upd: (b, dt) => { b.vy += b.ay * dt; b.x += b.vx * dt; b.y += b.vy * dt; if (b.y > GY - 10) { b.life = 0; Particles.puff(b.x, GY - 8, 3, 9, '#fff6e0'); } } }));
     });
-  }
-  draw() {
-    // pêndulo (fica atrás do rei)
-    if (this.pend) {
-      const b = this.bob();
-      ink(8); ctx.beginPath(); ctx.moveTo(470, -40); ctx.lineTo(b.x, b.y); ctx.stroke();
-      ctx.strokeStyle = '#c99a3a'; ctx.lineWidth = 4; ctx.stroke();
-      ink(5); circle(b.x, b.y, 36, '#d9a441'); circle(b.x, b.y, 22, '#b07a1e');
-      ctx.fillStyle = 'rgba(255,255,255,.5)'; circle(b.x - 12, b.y - 12, 7, ctx.fillStyle, false);
-    }
-    ctx.save(); ctx.translate(this.x, this.y);
-    if (this.dead) { ctx.translate(rand(-5, 5), rand(-4, 4)); ctx.rotate(Math.sin(this.t * 25) * 0.04); }
-    const flash = this.flash > 0;
-    // capa e braços
-    ink(5); ctx.beginPath(); ctx.moveTo(-80, 60); ctx.quadraticCurveTo(-150, 200, -130, GY - this.y); ctx.lineTo(130, GY - this.y); ctx.quadraticCurveTo(150, 200, 80, 60); ctx.closePath();
-    ctx.fillStyle = flash ? '#a03a44' : '#7a1f2a'; ctx.fill(); ctx.stroke();
-    ctx.fillStyle = '#f4ecd8'; ctx.fillRect(-12, 110, 24, GY - this.y - 110); ctx.strokeRect(-12, 110, 24, GY - this.y - 110);
-    const wv = Math.sin(this.t * 4) * 8;
-    hose(-105, 20, -165, -20 + wv, -15, 7); glove(-167, -22 + wv, 14);
-    hose(105, 20, 160, 70 - wv, 12, 7); glove(162, 72 - wv, 14);
-    // cetro
-    ink(5); ctx.beginPath(); ctx.moveTo(-167, -22 + wv); ctx.lineTo(-175, 120 + wv); ctx.stroke();
-    star(-165, -48 + wv, 16, '#ffd84a');
-    // porta do cuco
-    if (this.door > 0) {
-      const d = Math.min(1, this.door * 2);
-      ink(4); rrect(-22, -168, 44, 44, 4, '#3b2416');
-      ctx.save(); ctx.translate(0, -146 + (1 - d) * 20);
-      circle(0, 0, 14, '#8fc0b0'); pieEye(4, -3, 3, 4, 1, 0); ctx.beginPath(); ctx.moveTo(12, 0); ctx.lineTo(24, 3); ctx.lineTo(12, 6); ctx.closePath(); ctx.fillStyle = '#f2a33a'; ctx.fill(); ctx.stroke();
-      ctx.restore();
-    }
-    // mostrador
-    ink(7); circle(0, 0, 115, flash ? '#e8c070' : '#c99a3a');
-    ink(4); circle(0, 0, 98, '#fbf2dc');
-    ctx.fillStyle = INK; ctx.font = `18px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    const nums = ['XII', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI'];
-    for (let i = 0; i < 12; i++) { const a = -Math.PI / 2 + (i / 12) * TAU; if (i >= 8 && i <= 10) continue; ctx.fillText(nums[i], Math.cos(a) * 80, Math.sin(a) * 80); }
-    // coroa
-    ink(5); ctx.beginPath(); ctx.moveTo(-60, -100); ctx.lineTo(-70, -165); ctx.lineTo(-35, -130); ctx.lineTo(0, -178); ctx.lineTo(35, -130); ctx.lineTo(70, -165); ctx.lineTo(60, -100); ctx.closePath();
-    ctx.fillStyle = '#ffd84a'; ctx.fill(); ctx.stroke();
-    for (const [x, y] of [[-70, -165], [0, -178], [70, -165]]) circle(x, y, 7, '#c8352b');
-    // rosto
-    const blink = (this.t % 3.3) > 3.15 ? 1 : 0;
-    pieEye(-34, -24, 16, 21, -1, 0.4, blink); pieEye(30, -24, 16, 21, -1, 0.4, blink);
-    ink(5); ctx.beginPath(); ctx.moveTo(-58, -56); ctx.lineTo(-18, this.phase > 1 ? -44 : -52); ctx.moveTo(54, -56); ctx.lineTo(14, this.phase > 1 ? -44 : -52); ctx.stroke();
-    // bigode
-    ctx.beginPath(); ctx.moveTo(0, 18);
-    ctx.bezierCurveTo(-20, 8, -50, 40, -70, 18); ctx.bezierCurveTo(-50, 50, -20, 30, 0, 26);
-    ctx.bezierCurveTo(20, 30, 50, 50, 70, 18); ctx.bezierCurveTo(50, 40, 20, 8, 0, 18);
-    ctx.fillStyle = INK; ctx.fill();
-    ink(4); ctx.beginPath(); ctx.arc(0, 48, 14, 0.2, Math.PI - 0.2); ctx.stroke();
-    // ponteiros (nariz)
-    ctx.save(); ctx.rotate(this.hand * 0.2); ink(6); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -45); ctx.stroke(); ctx.restore();
-    ctx.save(); ctx.rotate(this.hand * 2); ink(4); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -75); ctx.stroke(); ctx.restore();
-    circle(0, 0, 8, '#c8352b');
-    ctx.restore();
   }
 }
 

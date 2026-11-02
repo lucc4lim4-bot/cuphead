@@ -45,6 +45,7 @@ const Snd = {
     if (!this.ac) return;
     switch (name) {
       case 'shoot': this.tone(rand(700, 820), 0.05, 'square', 0.035, -300); break;
+      case 'shoot2': this.tone(rand(420, 500), 0.06, 'triangle', 0.07, -160); break;
       case 'hit': this.noise(0.05, 0.06, 3000); break;
       case 'jump': this.tone(300, 0.15, 'square', 0.07, 400); break;
       case 'dash': this.noise(0.18, 0.15, 900); break;
@@ -60,6 +61,7 @@ const Snd = {
       case 'zap': this.noise(0.35, 0.3, 2500); this.tone(1400, 0.3, 'sawtooth', 0.1, -1200); break;
       case 'honk': this.tone(180, 0.25, 'sawtooth', 0.12, 60); this.tone(240, 0.25, 'square', 0.06, 60); break;
       case 'cuckoo': this.tone(780, 0.15, 'sine', 0.15); this.tone(620, 0.2, 'sine', 0.15, 0, 0.18); break;
+      case 'revive': [660, 880, 1100].forEach((f, i) => this.tone(f, 0.18, 'square', 0.09, 0, i * 0.07)); break;
       case 'win': [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.35, 'square', 0.1, 0, i * 0.12)); break;
       case 'lose': [392, 370, 349, 262].forEach((f, i) => this.tone(f, 0.4, 'triangle', 0.15, 0, i * 0.22)); break;
     }

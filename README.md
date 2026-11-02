@@ -1,16 +1,30 @@
-# Fósforo e a Chama Perdida
+# Fósforo & Candela e a Chama Perdida
 
 Jogo de navegador original no estilo dos desenhos animados dos anos 1930: um *boss rush* de tiro e plataforma com visual "rubber hose", grão de filme antigo e trilha de ragtime gerada na hora.
 
 ## História
 
-Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram roubadas. **Fósforo**, o aprendiz do faroleiro, precisa derrotar três figurões para recuperá-las e reacender o Farol:
+Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram roubadas. **Fósforo**, o aprendiz do faroleiro, e sua amiga **Candela** precisam derrotar três figurões para recuperá-las e reacender o Farol:
 
 1. **Gramofone Gustavo**, no Salão de Música: notas musicais, discos que rolam e saltos com onda de choque.
 2. **Nuvem Nimbo**, nos Telhados: chuva, raios teleguiados, nuvenzinhas perseguidoras, granizo e ventania.
 3. **Rei Relógio**, na Torre: engrenagens, espirais de ponteiros, um pêndulo gigante e o cuco que joga ovos.
 
+## Personagens
+
+| Herói | Arma | Estilo |
+|---|---|---|
+| **Fósforo**, o palito destemido | Faíscas | Tiro rápido, reto e de longo alcance |
+| **Candela**, a velinha valente | Leque de Cera | Três gotas em leque: curto alcance, forte de perto |
+
+## Modos
+
+- **1 Jogador**: escolha Fósforo ou Candela.
+- **2 Jogadores** (cooperativo local): cada um controla um herói. Quem perder toda a vida vira fantasma; o parceiro **rebate o coração rosa** do fantasma para revivê-lo. Os chefões ficam mais resistentes.
+
 ## Controles
+
+### 1 jogador
 
 | Tecla | Ação |
 |---|---|
@@ -23,7 +37,16 @@ Em Vila Vinil, a Chama Eterna do Farol se apagou e três brasas mágicas foram r
 | Shift | Travar a posição para mirar |
 | Esc / P | Pausar · M liga/desliga o som |
 
-Em celulares aparecem botões na tela.
+### 2 jogadores
+
+| | Mover | Pular | Atirar | Dash | EX | Travar |
+|---|---|---|---|---|---|---|
+| Jogador 1 | WASD | F / Espaço | G | H | R | Q |
+| Jogador 2 | Setas | Num1 ou `,` | Num2 ou `.` | Num3 ou `/` | Num0 ou L | Shift direito |
+
+Controles (gamepads) também funcionam: controle 1 = J1, controle 2 = J2 (A pular, X atirar, RB dash, B EX, LT travar, Start pausa).
+
+Em celulares aparecem botões na tela (1 jogador).
 
 Ao vencer, você recebe uma nota (D até S) calculada pelo tempo, pela vida restante, pelos rebotes e pelas chamas usadas. O progresso fica salvo no navegador.
 
@@ -44,7 +67,9 @@ Também funciona no GitHub Pages: publique a branch e use a raiz como pasta do s
 - `css/style.css`: layout responsivo
 - `js/engine.js`: entrada, utilidades de desenho, partículas, efeito de filme
 - `js/audio.js`: efeitos sonoros e música procedural (Web Audio)
-- `js/player.js`: o Fósforo (movimento, tiro, dash, rebote, EX e Super)
-- `js/bosses.js`: projéteis e os três chefões
-- `js/scenes.js`: cenários, luta, título, história, mapa e resultados
+- `js/art.js`: desenho dos heróis (Fósforo e Candela)
+- `js/player.js`: heróis jogáveis (movimento, armas, dash, rebote, EX, Super e reviver)
+- `js/bosses.js`: projéteis e comportamento dos três chefões
+- `js/boss-art.js`: desenho detalhado dos chefões
+- `js/scenes.js`: cenários, luta, título, seleção de personagem, história, mapa e resultados
 - `js/main.js`: laço principal e transições
