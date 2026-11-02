@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Fósforo & Candela</title>
+  <meta name="description" content="Um jogo de chefões estilo desenho animado dos anos 30: corra, atire, rebata e reacenda o Farol de Vila Vinil.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Rye&family=Special+Elite&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <main id="stage">
+    <canvas id="game" width="960" height="540" aria-label="Tela do jogo Fósforo e a Chama Perdida"></canvas>
+    <div id="touch" aria-hidden="true">
+      <div class="pad">
+        <button data-k="left">◀</button>
+        <button data-k="up">▲</button>
+        <button data-k="down">▼</button>
+        <button data-k="right">▶</button>
+      </div>
+      <div class="actions">
+        <button data-k="ex" class="small">EX</button>
+        <button data-k="dash" class="small">DASH</button>
+        <button data-k="shoot">FOGO</button>
+        <button data-k="jump">PULO</button>
+      </div>
+      <button data-k="pause" class="pausebtn">II</button>
+    </div>
+  </main>
+  <footer>
+    <p><b>1 jogador:</b> Setas/WASD · <b>Z</b> pular/rebater · <b>X</b> atirar · <b>C</b> dash · <b>V</b> EX · <b>Esc</b> pausa &nbsp;|&nbsp; <b>2 jogadores:</b> veja "Como jogar" · controles suportados</p>
+  </footer>
+  <script src="js/engine.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/art.js"></script>
+  <script src="js/player.js"></script>
+  <script src="js/bosses.js"></script>
+  <script src="js/boss-art.js"></script>
+  <script src="js/scenes.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
