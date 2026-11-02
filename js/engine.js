@@ -16,26 +16,56 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 const ease = (t) => t * t * (3 - 2 * t);
 
+// ---------- Armazenamento (com proteção) ----------
+const Save = {
+  data: { grades: {}, seenIntro: false, muted: false, binds: {}, opt: {} },
+  load() { try { const s = localStorage.getItem('fosforo-save'); if (s) Object.assign(this.data, JSON.parse(s)); } catch (e) {} },
+  write() { try { localStorage.setItem('fosforo-save', JSON.stringify(this.data)); } catch (e) {} },
+};
+Save.load();
+const OPT_DEFAULTS = { music: 7, sfx: 8, shake: true, film: true, touch: 'auto', tOpacity: 0.55, tScale: 1, tPos: {} };
+Save.data.opt = Object.assign({}, OPT_DEFAULTS, Save.data.opt || {});
+const opt = () => Save.data.opt;
+
 // ---------- Entrada (até 2 jogadores: teclado dividido e controles) ----------
 const keys = {}, pressed = {};                       // união de todos (usado nos menus)
 const PIN = [{ held: {}, pressed: {} }, { held: {}, pressed: {} }]; // por jogador
 const InputMode = { coop: false };
-const KEYMAP_SOLO = {
-  ArrowLeft: 'left', KeyA: 'left', ArrowRight: 'right', KeyD: 'right',
-  ArrowUp: 'up', KeyW: 'up', ArrowDown: 'down', KeyS: 'down',
-  KeyZ: 'jump', Space: 'jump', KeyJ: 'jump',
-  KeyX: 'shoot', KeyK: 'shoot',
-  KeyC: 'dash', KeyL: 'dash',
-  KeyV: 'ex', KeyI: 'ex',
-  ShiftLeft: 'lock', ShiftRight: 'lock',
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'shoot', 'dash', 'ex', 'lock'];
+const ACTION_NAMES = { left: 'Esquerda', right: 'Direita', up: 'Cima / mirar', down: 'Baixo / agachar', jump: 'Pular / rebater', shoot: 'Atirar', dash: 'Dash', ex: 'EX / Super', lock: 'Travar mira' };
+const DEFAULT_BINDS = {
+  solo: { left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'], up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], jump: ['KeyZ', 'Space', 'KeyJ'], shoot: ['KeyX', 'KeyK'], dash: ['KeyC', 'KeyL'], ex: ['KeyV', 'KeyI'], lock: ['ShiftLeft', 'ShiftRight'] },
+  p1: { left: ['KeyA'], right: ['KeyD'], up: ['KeyW'], down: ['KeyS'], jump: ['KeyF', 'Space'], shoot: ['KeyG'], dash: ['KeyH'], ex: ['KeyR'], lock: ['KeyQ', 'ShiftLeft'] },
+  p2: { left: ['ArrowLeft'], right: ['ArrowRight'], up: ['ArrowUp'], down: ['ArrowDown'], jump: ['Numpad1', 'Comma'], shoot: ['Numpad2', 'Period'], dash: ['Numpad3', 'Slash', 'IntlRo'], ex: ['Numpad0', 'KeyL'], lock: ['NumpadDecimal', 'ShiftRight'] },
 };
-const KEYMAP_COOP = {
-  KeyA: [0, 'left'], KeyD: [0, 'right'], KeyW: [0, 'up'], KeyS: [0, 'down'],
-  KeyF: [0, 'jump'], Space: [0, 'jump'], KeyG: [0, 'shoot'], KeyH: [0, 'dash'], KeyR: [0, 'ex'], KeyQ: [0, 'lock'], ShiftLeft: [0, 'lock'],
-  ArrowLeft: [1, 'left'], ArrowRight: [1, 'right'], ArrowUp: [1, 'up'], ArrowDown: [1, 'down'],
-  Numpad1: [1, 'jump'], Numpad2: [1, 'shoot'], Numpad3: [1, 'dash'], Numpad0: [1, 'ex'], NumpadDecimal: [1, 'lock'],
-  Comma: [1, 'jump'], Period: [1, 'shoot'], Slash: [1, 'dash'], IntlRo: [1, 'dash'], KeyL: [1, 'ex'], ShiftRight: [1, 'lock'],
-};
+const RESERVED_KEYS = ['Enter', 'NumpadEnter', 'Escape', 'KeyP', 'KeyM', 'Tab'];
+function getBinds(profile) { return Object.assign({}, DEFAULT_BINDS[profile], (Save.data.binds || {})[profile] || {}); }
+let KEYMAP_SOLO = {}, KEYMAP_COOP = {};
+function rebuildKeymaps() {
+  KEYMAP_SOLO = {}; KEYMAP_COOP = {};
+  for (const [a, codes] of Object.entries(getBinds('solo'))) for (const c of codes) KEYMAP_SOLO[c] = a;
+  ['p1', 'p2'].forEach((pr, i) => { for (const [a, codes] of Object.entries(getBinds(pr))) for (const c of codes) KEYMAP_COOP[c] = [i, a]; });
+}
+function setBind(profile, action, code) {
+  if (RESERVED_KEYS.includes(code)) return false;
+  const binds = Save.data.binds || (Save.data.binds = {});
+  for (const pr of profile === 'solo' ? ['solo'] : ['p1', 'p2']) {
+    const b = getBinds(pr);
+    for (const a in b) if (b[a].includes(code)) (binds[pr] || (binds[pr] = {}))[a] = b[a].filter((c) => c !== code);
+  }
+  (binds[profile] || (binds[profile] = {}))[action] = [code];
+  Save.write(); rebuildKeymaps(); return true;
+}
+function resetBinds(profile) { if (Save.data.binds) delete Save.data.binds[profile]; Save.write(); rebuildKeymaps(); }
+const KEY_LABELS = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Space: 'Espaço', ShiftLeft: 'Shift esq.', ShiftRight: 'Shift dir.', ControlLeft: 'Ctrl esq.', ControlRight: 'Ctrl dir.', AltLeft: 'Alt', AltRight: 'AltGr', Comma: ',', Period: '.', Slash: '/', IntlRo: '/ (ABNT)', Semicolon: ';', Quote: "'", BracketLeft: '[', BracketRight: ']', Backslash: '\\', Minus: '-', Equal: '=', Backquote: '`', Backspace: 'Apagar', CapsLock: 'Caps', NumpadDecimal: 'Num ,', NumpadAdd: 'Num +', NumpadSubtract: 'Num -' };
+function keyName(code) {
+  if (KEY_LABELS[code]) return KEY_LABELS[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return 'Num' + code.slice(6);
+  return code;
+}
+rebuildKeymaps();
 const KEYMAP_GLOBAL = { Enter: 'start', NumpadEnter: 'start', Escape: 'pause', KeyP: 'pause', KeyM: 'mute' };
 function mapKey(code) {
   if (KEYMAP_GLOBAL[code]) return [-1, KEYMAP_GLOBAL[code]];
@@ -55,7 +85,9 @@ function clearPressed() {
   for (const I of PIN) for (const k in I.pressed) I.pressed[k] = false;
 }
 const downCodes = {};
+const KeyCapture = { fn: null };
 addEventListener('keydown', (e) => {
+  if (KeyCapture.fn) { e.preventDefault(); const f = KeyCapture.fn; KeyCapture.fn = null; f(e.code); return; }
   const m = mapKey(e.code);
   if (!m) return;
   e.preventDefault();
@@ -93,30 +125,74 @@ const Pads = {
   },
 };
 
-// Controles de toque
-(function setupTouch() {
-  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  if (!isTouch) return;
-  document.body.classList.add('touch');
-  document.querySelectorAll('#touch button').forEach((b) => {
-    const k = b.dataset.k;
-    const down = (e) => { e.preventDefault(); Snd.init(); press(k === 'pause' ? -1 : 0, k); if (k === 'jump') press(-1, 'start'); b.classList.add('on'); };
-    const up = (e) => { e.preventDefault(); release(k === 'pause' ? -1 : 0, k); if (k === 'jump') release(-1, 'start'); b.classList.remove('on'); };
-    b.addEventListener('pointerdown', down);
-    b.addEventListener('pointerup', up);
-    b.addEventListener('pointercancel', up);
-    b.addEventListener('pointerleave', up);
-  });
-  cv.addEventListener('pointerdown', () => { Snd.init(); press(-1, 'start'); setTimeout(() => release(-1, 'start'), 60); });
-})();
-
-// ---------- Armazenamento (com proteção) ----------
-const Save = {
-  data: { grades: {}, seenIntro: false, muted: false },
-  load() { try { const s = localStorage.getItem('fosforo-save'); if (s) Object.assign(this.data, JSON.parse(s)); } catch (e) {} },
-  write() { try { localStorage.setItem('fosforo-save', JSON.stringify(this.data)); } catch (e) {} },
+// ---------- Controles de toque (posição, tamanho e opacidade configuráveis) ----------
+const TOUCH_DEFAULT_POS = {
+  up: [13, 63], left: [6, 79], right: [20, 79], down: [13, 93],
+  lock: [70, 92], shoot: [82, 86], jump: [93, 78], dash: [82, 66], ex: [93, 58], pause: [96, 8],
 };
-Save.load();
+const Touch = {
+  isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
+  editing: false,
+  visible() { const m = opt().touch; return m === 'on' || (m === 'auto' && this.isTouchDevice) || this.editing; },
+  apply() {
+    document.body.classList.toggle('touch', this.visible());
+    document.body.classList.toggle('editing', this.editing);
+    const o = opt();
+    document.querySelectorAll('#touch button[data-k]').forEach((b) => {
+      const k = b.dataset.k, pos = (o.tPos && o.tPos[k]) || TOUCH_DEFAULT_POS[k];
+      b.style.left = pos[0] + '%'; b.style.top = pos[1] + '%';
+      b.style.setProperty('--s', o.tScale);
+      b.style.opacity = this.editing ? Math.max(0.6, o.tOpacity) : o.tOpacity;
+    });
+    const op = document.getElementById('tb-opacity'), sz = document.getElementById('tb-size');
+    if (op) op.value = Math.round(o.tOpacity * 100);
+    if (sz) sz.value = Math.round(o.tScale * 100);
+  },
+  startEdit(onDone) { this.editing = true; this.onDone = onDone; this.backup = JSON.stringify({ p: opt().tPos, o: opt().tOpacity, s: opt().tScale }); this.apply(); },
+  endEdit(save) {
+    if (!save) { const b = JSON.parse(this.backup); opt().tPos = b.p || {}; opt().tOpacity = b.o; opt().tScale = b.s; }
+    Save.write(); this.editing = false; this.apply(); const d = this.onDone; this.onDone = null; if (d) d();
+  },
+  resetLayout() { opt().tPos = {}; opt().tOpacity = OPT_DEFAULTS.tOpacity; opt().tScale = 1; this.apply(); },
+  init() {
+    const stage = document.getElementById('stage');
+    document.querySelectorAll('#touch button[data-k]').forEach((b) => {
+      const k = b.dataset.k;
+      let drag = null;
+      const down = (e) => {
+        e.preventDefault(); Snd.init();
+        if (this.editing) { b.setPointerCapture(e.pointerId); drag = { id: e.pointerId }; b.classList.add('on'); return; }
+        press(k === 'pause' ? -1 : 0, k); if (k === 'jump') press(-1, 'start'); b.classList.add('on');
+      };
+      const move = (e) => {
+        if (!drag || !this.editing) return;
+        const r = stage.getBoundingClientRect();
+        const x = clamp(((e.clientX - r.left) / r.width) * 100, 3, 97), y = clamp(((e.clientY - r.top) / r.height) * 100, 4, 96);
+        opt().tPos = Object.assign({}, opt().tPos, { [k]: [Math.round(x * 10) / 10, Math.round(y * 10) / 10] });
+        this.apply();
+      };
+      const up = (e) => {
+        e.preventDefault(); b.classList.remove('on');
+        if (drag) { drag = null; return; }
+        release(k === 'pause' ? -1 : 0, k); if (k === 'jump') release(-1, 'start');
+      };
+      b.addEventListener('pointerdown', down); b.addEventListener('pointermove', move);
+      b.addEventListener('pointerup', up); b.addEventListener('pointercancel', up);
+      b.addEventListener('pointerleave', (e) => { if (!drag) up(e); });
+      b.addEventListener('contextmenu', (e) => e.preventDefault());
+    });
+    const on = (id, ev, fn) => { const el = document.getElementById(id); if (el) el.addEventListener(ev, fn); };
+    on('tb-opacity', 'input', (e) => { opt().tOpacity = e.target.value / 100; this.apply(); });
+    on('tb-size', 'input', (e) => { opt().tScale = e.target.value / 100; this.apply(); });
+    on('tb-save', 'click', () => this.endEdit(true));
+    on('tb-cancel', 'click', () => this.endEdit(false));
+    on('tb-reset', 'click', () => this.resetLayout());
+    on('tb-flip', 'click', () => document.getElementById('touchbar').classList.toggle('bottom'));
+    cv.addEventListener('pointerdown', () => { if (this.editing) return; Snd.init(); press(-1, 'start'); setTimeout(() => release(-1, 'start'), 60); });
+    this.apply();
+  },
+};
+Touch.init();
 
 // ---------- Utilidades de desenho ----------
 function ink(w = 4) { ctx.lineWidth = w; ctx.strokeStyle = INK; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; }
@@ -299,6 +375,7 @@ const Film = {
   },
   draw(dt) {
     this.frame++;
+    if (!opt().film) { ctx.drawImage(this.vignette, 0, 0); return; }
     // tom sépia quente
     ctx.save();
     ctx.globalCompositeOperation = 'multiply'; ctx.fillStyle = 'rgba(255,226,170,0.28)'; ctx.fillRect(0, 0, W, H);

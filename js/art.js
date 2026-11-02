@@ -14,8 +14,8 @@ const HEROES = {
   },
 };
 
-function drawFlame(x, y, s, t, pal, outline = true) {
-  ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
+function drawFlame(x, y, s, t, pal, outline = true, lean = 0) {
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); if (lean) ctx.transform(1, 0, lean, 1, 0, 0);
   const w = Math.sin(t * 21) * 2.2, h = Math.sin(t * 16.5) * 3;
   const layers = [[1, pal[0]], [0.7, pal[1]], [0.4, pal[2]]];
   layers.forEach(([k, c], i) => {
@@ -30,6 +30,9 @@ function drawFlame(x, y, s, t, pal, outline = true) {
   });
   ctx.restore();
 }
+
+// a chama inclina para trás quando o herói corre ou dá dash
+function flameLean(o) { return clamp((o.vx || 0) * (o.facing || 1) / 900, -0.7, 0.7); }
 
 // Calcula a pose comum (pernas, inclinação, respiração)
 function heroPose(o) {
@@ -115,7 +118,7 @@ function drawFosforoBody(o, hipY, P, H) {
   ctx.fillStyle = 'rgba(90,10,5,.45)'; for (const [dx, dy] of [[10, -12], [-12, 6], [14, 8]]) { ctx.beginPath(); ctx.arc(hx + dx, hy + dy, 1.4, 0, TAU); ctx.fill(); }
   // chama
   const fs = 1 + (o.shooting ? 0.3 : 0) + (o.superT > 0 ? 0.9 : 0) + (o.parry ? 0.4 : 0);
-  drawFlame(hx - 4, hy - 17, fs, t, H.flame);
+  drawFlame(hx - 4, hy - 17, fs, t, H.flame, true, flameLean(o));
   // rosto
   const blink = (t % 3.2) > 3.05 ? 1 : 0;
   const ly = o.aim && o.aim.y < -0.3 ? -1 : o.aim && o.aim.y > 0.3 ? 1 : 0;
@@ -164,7 +167,7 @@ function drawCandelaBody(o, hipY, P, H) {
   // pavio e chama
   ink(3); ctx.beginPath(); ctx.moveTo(1, top + 1); ctx.quadraticCurveTo(3, top - 5, 1, top - 9); ctx.stroke();
   const fs = 1 + (o.shooting ? 0.3 : 0) + (o.superT > 0 ? 0.9 : 0) + (o.parry ? 0.4 : 0);
-  drawFlame(1, top - 11, fs, t + 0.5, H.flame);
+  drawFlame(1, top - 11, fs, t + 0.5, H.flame, true, flameLean(o));
   // laço
   ctx.save(); ctx.translate(-12, top + 6); ctx.rotate(-0.4);
   ink(2.5);
