@@ -92,7 +92,8 @@ class Fight {
     this.players = mode.coop
       ? [new Player(0, mode.chars[0], 120), new Player(1, mode.chars[1], 210)]
       : [new Player(0, mode.chars[0], 160)];
-    for (const p of this.players) p.hp = this.diff.lives;
+    for (const p of this.players) { p.hp = this.diff.lives + (p.charm === 'c_heart' ? 1 : 0); p.maxHp = p.hp; }
+    this.lastPhase = 1; this.banner = null; this.consolation = false;
     this.focus = this.players[0];
     this.pb = []; this.eb = []; this.wind = 0;
     this.state = 'intro'; this.stateT = 0; this.shake = 0; this.hitstop = 0; this.t = 0;
@@ -123,22 +124,42 @@ class Fight {
 
     if (this.state === 'intro') {
       if (!this.landed && this.stateT > 0.75) { this.landed = true; this.shake = 14; Snd.play('boom'); const c = boss.hurtCircles()[0] || { x: W * 0.75, y: GY - 100 }; Particles.puff(c.x - 80, GY - 8, 5, 18); Particles.puff(c.x + 80, GY - 8, 5, 18); }
-      boss.t += dt; for (const p of this.players) p.anim += dt; if (this.stateT > 2.3) { this.state = 'play'; this.stateT = 0; } return; }
+      boss.t += dt; for (const p of this.players) { p.anim += dt; p.ready = true; } if (this.stateT > 2.3) { this.state = 'play'; this.stateT = 0; for (const p of this.players) p.ready = false; } return; }
     if (this.state === 'dead') { this.updateDeath(); return; }
 
     if (this.state === 'play') { this.stats.time += dt; for (const p of this.players) p.update(dt, this); }
     else if (this.state === 'win') for (const p of this.players) p.update(dt, this);
     boss.update(dt, this);
+    if (this.banner) this.banner.t -= dt;
+    if (boss.phase !== this.lastPhase && !boss.dead) {
+      this.lastPhase = boss.phase; boss.phaseT = 1.0; this.banner = { text: `FASE ${boss.phase}!`, t: 1.4 };
+      const c = boss.hurtCircles()[0]; if (c) { Particles.stars(c.x, c.y, 16, '#ffd84a'); Particles.puff(c.x, c.y, 8, 22); }
+      this.hitstop = Math.max(this.hitstop, 0.15);
+    }
 
     // tiros dos jogadores
     for (const b of this.pb) {
-      b.life -= dt; b.x += b.vx * dt; b.y += b.vy * dt;
+      b.life -= dt;
+      if (b.homing && b.t2 === undefined) b.t2 = 0;
+      if (b.homing) {
+        b.t2 += dt;
+        let best = null, bd = 1e9;
+        for (const tg of this.targets()) for (const c of tg.hurtCircles()) { const d = (c.x - b.x) ** 2 + (c.y - b.y) ** 2; if (d < bd) { bd = d; best = c; } }
+        if (best && b.t2 > 0.06) {
+          const sp = Math.hypot(b.vx, b.vy), a = Math.atan2(b.vy, b.vx), want = Math.atan2(best.y - b.y, best.x - b.x);
+          let d = Math.atan2(Math.sin(want - a), Math.cos(want - a)); const na = a + clamp(d, -7 * dt, 7 * dt);
+          b.vx = Math.cos(na) * sp; b.vy = Math.sin(na) * sp;
+        }
+      }
+      if (b.grav) b.vy += b.grav * dt;
+      b.x += b.vx * dt; b.y += b.vy * dt;
+      if (b.kind === 'bomb' && b.y > GY - 10 && b.life > 0) { this.explode(b); b.life = 0; }
       if (b.x < -40 || b.x > W + 40 || b.y < -40 || b.y > H + 40) b.life = 0;
       if (b.life <= 0 || this.state !== 'play') continue;
       for (const tg of this.targets()) {
         const hit = tg.hurtCircles().some((c) => (c.x - b.x) ** 2 + (c.y - b.y) ** 2 < (c.r + b.r) ** 2);
         if (hit) {
-          tg.damage(b.dmg, this); b.life = 0;
+          tg.damage(b.dmg, this); b.life = 0; if (b.kind === 'bomb') this.explode(b, tg);
           const o = b.from; if (o && o.superT <= 0 && b.kind !== 'ember') o.meter = Math.min(5, o.meter + 0.012 * b.dmg);
           if (b.kind === 'ember') { Particles.stars(b.x, b.y, 10, HEROES[b.hero].flame[1]); Snd.play('boom'); this.shake = 6; } else { Particles.stars(b.x, b.y, 1, b.kind === 'wax' ? '#bfe3ff' : '#ffd84a'); Snd.play('hit'); }
           break;
@@ -155,7 +176,7 @@ class Fight {
       for (const p of this.players) {
         if (!p.alive || b.life <= 0) continue;
         const box = p.box();
-        if (b.pink && p.parryT > 0 && circRect(b.x, b.y, b.r + 16, box.x, box.y - 10, box.w, box.h + 10)) { this.parry(p, b); continue; }
+        if (b.pink && p.parryT > 0 && circRect(b.x, b.y, b.r + p.parryR, box.x, box.y - 10, box.w, box.h + 10)) { this.parry(p, b); continue; }
         if (bulletHits(b, box)) p.hurt(this);
       }
     }
@@ -168,7 +189,7 @@ class Fight {
       // reviver o parceiro: rebater o coração rosa do fantasma
       for (const g of this.players) if (g.ghost && !g.gone && p.parryT > 0) {
         const h = g.heartPos();
-        if (circRect(h.x, h.y, 30, box.x, box.y - 10, box.w, box.h + 10)) {
+        if (circRect(h.x, h.y, 14 + p.parryR, box.x, box.y - 10, box.w, box.h + 10)) {
           g.revive(); p.vy = -560; p.parryT = 0; p.parryUsed = false; p.jumpHeld = false;
           this.hitstop = 0.12; Snd.play('revive'); Particles.stars(h.x, h.y, 12, PINK);
           Particles.add({ kind: 'text', text: 'REVIVEU!', x: h.x, y: h.y - 20, vy: -40, life: 1.2, size: 28, color: PINK });
@@ -178,10 +199,18 @@ class Fight {
 
     if (this.state === 'play' && !this.players.some((p) => p.alive)) {
       this.state = 'dead'; this.stateT = 0; this.menuSel = 0; Snd.play('lose'); Music.stop();
+      if (boss.phase === 3) { this.consolation = true; addCoins(1); }
     }
     if (this.state === 'win') {
       if (Math.random() < 0.25) { const c = boss.hurtCircles()[0] || { x: boss.x || W * 0.75, y: boss.y || 250 }; Particles.stars(c.x + rand(-80, 80), c.y + rand(-80, 80), 6, pick(['#ffd84a', '#ff9a2e', '#fff'])); if (Math.random() < 0.3) Snd.play('boom'); this.shake = 5; }
       if (this.stateT > 3.6) Game.go(new Results(this.idx, this.stats, Math.max(...this.players.map((p) => p.hp)), this.diffId));
+    }
+  }
+  explode(b, hitTarget) {
+    Particles.stars(b.x, b.y, 12, '#ffb347'); Particles.puff(b.x, b.y, 5, 16, '#e8d8b8'); Snd.play('boom'); this.shake = Math.max(this.shake, 5);
+    for (const tg of this.targets()) {
+      if (tg === hitTarget) continue;
+      if (tg.hurtCircles().some((c) => (c.x - b.x) ** 2 + (c.y - b.y) ** 2 < (c.r + 70) ** 2)) tg.damage(b.dmg * 0.5, this);
     }
   }
   parry(p, b) {
@@ -221,7 +250,18 @@ class Fight {
       const k = Math.min(1, (this.stateT - 2.2) / 1.2), c = this.boss.hurtCircles()[0] || { x: W * 0.75, y: 250 };
       ctx.globalAlpha = 1 - k; ctx.translate(c.x, c.y + k * 120); ctx.rotate(k * 0.5); ctx.scale(1 - k * 0.4, 1 - k * 0.4); ctx.translate(-c.x, -c.y);
     }
-    this.boss.draw();
+    const main = ctx, L = this.layer || (this.layer = Object.assign(document.createElement('canvas'), { width: W, height: H }));
+    const lc = L.getContext('2d'); lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, W, H);
+    swapCtx(lc); this.boss.draw();
+    if (this.boss.flash > 0) { lc.globalCompositeOperation = 'source-atop'; lc.fillStyle = 'rgba(255,250,235,.3)'; lc.fillRect(0, 0, W, H); lc.globalCompositeOperation = 'source-over'; }
+    swapCtx(main);
+    const hc = this.boss.hurtCircles()[0];
+    if (hc && (this.boss.flash > 0 || this.boss.phaseT > 0)) {
+      const pk = this.boss.phaseT > 0 ? 1 + Math.sin(this.t * 40) * 0.025 : 1.012;
+      ctx.translate(hc.x, hc.y); ctx.scale(pk, 2 - pk); ctx.translate(-hc.x, -hc.y);
+      if (this.boss.phaseT > 0) ctx.translate(rand(-4, 4), rand(-3, 3));
+    }
+    ctx.drawImage(L, 0, 0);
     ctx.restore();
     for (const b of this.pb) drawPlayerBullet(b, this.t);
     for (const p of this.players) p.draw();
@@ -243,32 +283,78 @@ class Fight {
   }
   drawHUD() {
     this.players.forEach((p, i) => {
-      const right = i === 1, x0 = right ? W - 18 - 222 : 18, y0 = Touch.visible() ? 16 : H - 54;
+      const hearts = Math.max(p.maxHp || 3, p.hp);
+      const cardW = 14 + hearts * 17, wTot = 44 + cardW + 10 + 5 * 21 + 8 + 2 * 26;
+      const right = i === 1, x0 = right ? W - 14 - wTot : 14, y0 = Touch.visible() ? 16 : H - 54;
       ctx.save(); ctx.translate(x0, y0);
+      // painel de fundo
+      ctx.fillStyle = 'rgba(26,20,16,.35)'; rrect(-6, -4, wTot + 12, 46, 12, 'rgba(26,20,16,.35)', false);
       // retrato
       ink(3.5); circle(19, 18, 19, p.type === 'candela' ? '#cfe2f6' : '#f3d2c8');
       ctx.save(); ctx.beginPath(); ctx.arc(19, 18, 17, 0, TAU); ctx.clip();
-      drawHero(p.type, 17, p.type === 'candela' ? 86 : 96, { scale: p.type === 'candela' ? 0.95 : 1, t: this.t, hurt: !p.alive });
+      drawHero(p.type, 17, p.type === 'candela' ? 86 : 96, { scale: p.type === 'candela' ? 0.95 : 1, t: this.t, hurt: !p.alive || p.hurtT > 0 });
       ctx.restore(); ink(3.5); circle(19, 18, 19, null);
-      // cartão de vida
-      const low = p.hp === 1 && Math.floor(this.t * 4) % 2;
-      ink(4); rrect(44, 2, 74, 34, 6, !p.alive ? '#6b5a4a' : low ? '#c8352b' : CREAM);
-      ctx.font = `19px ${FONT_TITLE}`; ctx.fillStyle = low || !p.alive ? CREAM : INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-      ctx.fillText(p.alive ? `PV ${p.hp}` : (p.ghost && !p.gone ? 'AJUDA!' : 'FIM'), 81, 20);
+      // cartão de vida com corações
+      const low = p.hp === 1 && p.alive && Math.floor(this.t * 4) % 2;
+      ink(4); rrect(44, 2, cardW, 34, 8, !p.alive ? '#6b5a4a' : low ? '#f2c4b8' : CREAM);
+      if (p.alive) {
+        for (let k = 0; k < hearts; k++) {
+          const hx = 44 + 15 + k * 17, full = k < p.hp, beat = full && k === p.hp - 1 ? 1 + Math.sin(this.t * 8) * 0.08 : 1;
+          ctx.save(); ctx.translate(hx, 20); ctx.scale(beat, beat);
+          ctx.beginPath(); ctx.moveTo(0, 7); ctx.bezierCurveTo(-11, -1, -6, -10, 0, -4); ctx.bezierCurveTo(6, -10, 11, -1, 0, 7);
+          ctx.fillStyle = full ? '#d8342c' : 'rgba(26,20,16,.18)'; ctx.fill(); ink(2); ctx.stroke();
+          if (full) shine(-3.5, -3, 2, 1.3, -0.6, 0.7);
+          ctx.restore();
+        }
+      } else { ctx.font = `16px ${FONT_TITLE}`; ctx.fillStyle = CREAM; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(p.ghost && !p.gone ? 'AJUDA!' : 'FIM', 44 + cardW / 2, 20); }
+      if (p.bubble) { ctx.strokeStyle = 'rgba(120,190,240,.95)'; ctx.lineWidth = 3; rrect(42, 0, cardW + 4, 38, 10, null); }
       // medidor de chamas (5 cartas)
-      const pal = HEROES[p.type].flame;
+      const pal = HEROES[p.type].flame, mx = 44 + cardW + 10;
       for (let k = 0; k < 5; k++) {
         const fill = clamp(p.meter - k, 0, 1), full = fill >= 1;
-        ctx.save(); ctx.translate(134 + k * 21, 19);
+        ctx.save(); ctx.translate(mx + 9 + k * 21, 19);
         if (full) ctx.rotate(Math.sin(this.t * 6 + k) * 0.08 + (p.meter >= 5 ? Math.sin(this.t * 20) * 0.1 : 0));
         ink(3); rrect(-9, -15, 18, 30, 3, '#3a2a1e');
         if (fill > 0) { ctx.fillStyle = full ? pal[1] : 'rgba(168,106,42,.9)'; ctx.fillRect(-7, 13 - 26 * fill, 14, 26 * fill); }
         if (full) { ctx.fillStyle = pal[2]; ctx.beginPath(); ctx.moveTo(0, -8); ctx.quadraticCurveTo(6, 2, 0, 7); ctx.quadraticCurveTo(-6, 2, 0, -8); ctx.fill(); }
         ctx.restore();
       }
-      if (this.coop) { ctx.font = `14px ${FONT_TITLE}`; ctx.fillStyle = CREAM; ctx.textAlign = 'left'; ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeText(`J${i + 1}`, 0, -6); ctx.fillText(`J${i + 1}`, 0, -6); }
+      if (p.meter >= 5 && p.alive) { ctx.font = `11px ${FONT_TITLE}`; ctx.fillStyle = '#ffd84a'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeText('SUPER!', mx + 51, -2); ctx.fillText('SUPER!', mx + 51, -2); }
+      // itens equipados
+      const ix = mx + 5 * 21 + 8;
+      [p.weapon, p.charm].forEach((id, k) => {
+        const cx = ix + 12 + k * 26;
+        ink(2.5); circle(cx, 19, 12, id ? '#fff6e0' : 'rgba(255,246,224,.25)');
+        if (id) drawItemIcon(id, cx, 20, 0.36, this.t);
+        if (id === 'c_bubble' && !p.bubble) { ctx.fillStyle = 'rgba(26,20,16,.5)'; ctx.beginPath(); ctx.moveTo(cx, 19); ctx.arc(cx, 19, 12, -Math.PI / 2, -Math.PI / 2 + TAU * (p.bubbleT / 25)); ctx.fill(); }
+      });
+      if (this.coop) { ctx.font = `14px ${FONT_TITLE}`; ctx.fillStyle = CREAM; ctx.textAlign = 'left'; ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeText(`J${i + 1}`, 0, -8); ctx.fillText(`J${i + 1}`, 0, -8); }
       ctx.restore();
     });
+    // barra de vida do chefão
+    if (opt().bossBar && this.state !== 'intro') {
+      const b = this.boss, k = clamp(b.hp / b.max, 0, 1);
+      this.barLag = this.barLag === undefined ? k : Math.max(k, this.barLag - 0.004);
+      const bw = 340, bx = W / 2 - bw / 2, by = Touch.visible() ? 64 : 14;
+      ctx.save();
+      ink(4); rrect(bx - 4, by - 4, bw + 8, 26, 9, '#2a1d14');
+      ctx.fillStyle = '#fff6e0'; ctx.fillRect(bx, by, bw * this.barLag, 18);
+      const g = ctx.createLinearGradient(0, by, 0, by + 18); g.addColorStop(0, '#e2523a'); g.addColorStop(1, '#a8241a');
+      ctx.fillStyle = g; ctx.fillRect(bx, by, bw * k, 18);
+      shine(bx + bw * k * 0.5, by + 5, bw * k * 0.45, 2.2, 0, 0.35);
+      ctx.strokeStyle = INK; ctx.lineWidth = 3; for (const m of [0.33, 0.66]) { ctx.beginPath(); ctx.moveTo(bx + bw * m, by - 2); ctx.lineTo(bx + bw * m, by + 20); ctx.stroke(); }
+      ctx.font = `13px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.fillStyle = CREAM;
+      const label = `${this.def.name}  ·  Fase ${b.phase}`;
+      ctx.strokeText(label, W / 2, by + 9); ctx.fillText(label, W / 2, by + 9);
+      ctx.restore();
+    }
+    // aviso de nova fase
+    if (this.banner && this.banner.t > 0) {
+      const t = 1.4 - this.banner.t, k = Math.min(1, t * 6) * Math.min(1, this.banner.t * 4);
+      ctx.save(); ctx.globalAlpha = k; ctx.translate(W / 2, 150); ctx.scale(0.8 + k * 0.2, 0.8 + k * 0.2); ctx.rotate(-0.05);
+      outlinedText(this.banner.text, 0, 0, 52, '#ffd84a', FONT_TITLE, 'center', 10);
+      ctx.restore();
+    }
   }
   drawIntro() {
     const t = this.stateT;
@@ -301,6 +387,7 @@ class Fight {
     star(bx + bw, by, 16, '#ffd84a');
     ctx.save(); ctx.translate(bx + bw * prog * Math.min(1, (t - 0.5) * 1.5), by - 12); drawHero(this.players[0].type, 0, 22, { scale: 0.45, t: this.t }); ctx.restore();
     ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(`Progresso: ${Math.round(prog * 100)}%  ·  ${this.diff.name}`, 0, 30);
+    if (this.consolation) { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = '#8a6a10'; ctx.fillText('Chegou à fase 3: +1 moeda de consolação!', 0, 50); }
     const opts = ['Tentar de novo', 'Voltar ao mapa'];
     opts.forEach((o, i) => {
       const sel = i === this.menuSel;
@@ -329,6 +416,15 @@ function drawPlayerBullet(b, t) {
     ink(4); ctx.beginPath(); ctx.moveTo(-50, 0); ctx.quadraticCurveTo(-10, -30, 20, -22); ctx.arc(0, 0, 24, -1.2, 1.2); ctx.quadraticCurveTo(-10, 30, -50, 0);
     ctx.fillStyle = pal[0]; ctx.fill(); ctx.stroke();
     circle(4, 0, 14, pal[1], false); circle(8, 0, 7, pal[2], false); shine(10, -6, 4, 2, 0, 0.8);
+  } else if (b.kind === 'bomb') {
+    ctx.rotate(t * 12);
+    ink(3); circle(0, 0, 11, '#2a2422'); shine(-4, -4, 3.5, 2, -0.6, 0.55);
+    ctx.beginPath(); ctx.moveTo(0, -11); ctx.lineTo(4, -17); ctx.stroke();
+    star(5, -19, 4 + Math.sin(t * 40) * 1.5, '#ffd84a');
+  } else if (b.kind === 'homing') {
+    ctx.fillStyle = 'rgba(255,150,60,.35)'; ctx.beginPath(); ctx.ellipse(-14, 0, 14, 4, 0, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(-14, 0); ctx.quadraticCurveTo(-2, -7, 7, -5); ctx.arc(7, 0, 5, -Math.PI / 2, Math.PI / 2); ctx.quadraticCurveTo(-2, 7, -14, 0);
+    ctx.fillStyle = '#ff6a8a'; ctx.fill(); ink(2.5); ctx.stroke(); circle(5, 0, 3, '#fff1a8', false);
   } else if (b.kind === 'wax') {
     ctx.beginPath(); ctx.moveTo(-16, 0); ctx.quadraticCurveTo(-2, -8, 6, -7); ctx.arc(6, 0, 7, -Math.PI / 2, Math.PI / 2); ctx.quadraticCurveTo(-2, 8, -16, 0);
     ctx.fillStyle = '#8fc6f2'; ctx.fill(); ink(2.5); ctx.stroke();
@@ -399,10 +495,9 @@ class CharSelect {
 // ---------- Cena: Resultado ----------
 function computeGrade(stats, hp, idx, diffId = 'normal') {
   const par = BOSSES[idx].par || 120, D = DIFFS[diffId] || DIFFS.normal;
-  hp = Math.min(3, hp * (3 / Math.min(3, D.lives)));
   let s = 0;
   s += stats.time <= par * 0.65 ? 30 : stats.time <= par ? 22 : stats.time <= par * 1.5 ? 12 : 5;
-  s += hp * 10;
+  s += 30 * Math.min(1, hp / D.lives);
   s += Math.min(stats.parries, 3) * 7;
   s += Math.min(stats.meterUsed, 6) * 3.2;
   const table = [[96, 'S'], [88, 'A+'], [80, 'A'], [74, 'A-'], [68, 'B+'], [60, 'B'], [54, 'B-'], [48, 'C+'], [40, 'C'], [0, 'D']];
@@ -421,6 +516,8 @@ class Results {
     const better = !old || GRADE_ORDER.indexOf(this.res.grade) > GRADE_ORDER.indexOf(old)
       || (this.res.grade === old && DIFF_ORDER.indexOf(diffId) > DIFF_ORDER.indexOf(gd[id] || 'normal'));
     this.newBest = better;
+    this.firstClear = !old;
+    this.coins = coinsForWin(this.res.grade, diffId, this.firstClear); addCoins(this.coins);
     if (better) { Save.data.grades[id] = this.res.grade; gd[id] = diffId; Save.write(); }
     Music.play('map');
   }
@@ -455,6 +552,9 @@ class Results {
       ctx.restore();
       ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('NOTA', 690, 375);
       if (this.newBest) { ctx.fillStyle = '#c8352b'; ctx.fillText('★ novo recorde! ★', 690, 400); }
+      ink(4); rrect(590, 414, 200, 40, 10, '#fff6e0'); drawCoin(616, 434, 12, this.t);
+      ctx.font = `18px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(`+${this.coins}  (total ${Save.data.coins})`, 636, 435);
+      if (this.firstClear) { ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = '#2f8a4a'; ctx.textAlign = 'center'; ctx.fillText('bônus de primeira vitória!', 690, 464); }
     }
     Game.mode.chars.forEach((c, i) => drawHero(c, 280 + i * 70, 450, { dance: true, t: this.t + i * 0.4, scale: 0.9, facing: i ? -1 : 1 }));
     if (this.t > 1 && Math.floor(this.t * 2) % 2) { ctx.font = `20px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('Pressione Z para continuar', W / 2, 465); }
@@ -617,13 +717,28 @@ function sunburstClip(cx, cy, t) {
 }
 
 // ---------- Cena: Mapa de Vila Vinil ----------
-const NODES = [{ x: 120, y: 430 }, { x: 250, y: 265 }, { x: 395, y: 430 }, { x: 535, y: 265 }, { x: 675, y: 430 }, { x: 800, y: 275 }, { x: 895, y: 470 }];
+// nó 0 = loja, nós 1..6 = chefões, último = Farol
+const NODES = [{ x: 92, y: 262 }, { x: 175, y: 432 }, { x: 300, y: 265 }, { x: 430, y: 432 }, { x: 560, y: 265 }, { x: 690, y: 432 }, { x: 812, y: 275 }, { x: 900, y: 472 }];
+function drawShopIcon(t, sel) {
+  ink(4); rrect(-40, -30, 80, 56, 6, '#c9933a');
+  ctx.beginPath(); ctx.moveTo(-48, -28); ctx.lineTo(0, -58); ctx.lineTo(48, -28); ctx.closePath(); ctx.fillStyle = '#7a1f2a'; ctx.fill(); ctx.stroke();
+  // toldo listrado
+  for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#fff6e0' : '#c8352b'; ctx.fillRect(-40 + i * 13.3, -30, 13.3, 12); }
+  ink(3); ctx.strokeRect(-40, -30, 80, 12);
+  rrect(-12, -6, 24, 32, 3, '#5a3420');
+  ink(2); rrect(-34, -4, 16, 14, 2, '#ffe9a8'); rrect(18, -4, 16, 14, 2, '#ffe9a8');
+  drawCoin(0, -42, 9 + (sel ? Math.sin(t * 6) : 0), t);
+}
 class MapScene {
-  constructor(sel = 0) { this.sel = Math.min(sel, BOSSES.length); this.t = 0; this.px = NODES[this.sel].x; this.py = NODES[this.sel].y; Music.play('map'); }
+  // bossIdx: -1 = loja, 0..5 = chefão, 6 = Farol
+  constructor(bossIdx = 0) {
+    this.sel = clamp(bossIdx + 1, 0, BOSSES.length + 1); this.t = 0;
+    this.px = NODES[this.sel].x; this.py = NODES[this.sel].y; Music.play('map');
+  }
   allDone() { return BOSSES.every((b) => Save.data.grades[b.id]); }
   update(dt) {
     this.t += dt;
-    const max = this.allDone() ? BOSSES.length : BOSSES.length - 1;
+    const max = this.allDone() ? BOSSES.length + 1 : BOSSES.length;
     if (pressed.right || pressed.down) { if (this.sel < max) { this.sel++; Snd.play('select'); } }
     if (pressed.left || pressed.up) { if (this.sel > 0) { this.sel--; Snd.play('select'); } }
     const n = NODES[this.sel]; this.px = lerp(this.px, n.x, dt * 8); this.py = lerp(this.py, n.y, dt * 8);
@@ -631,7 +746,8 @@ class MapScene {
     InputMode.coop = Game.mode.coop;
     if (pressed.jump || pressed.start) {
       Snd.play('confirm');
-      if (this.sel < BOSSES.length) Game.go(new Fight(this.sel));
+      if (this.sel === 0) Game.go(new Shop());
+      else if (this.sel <= BOSSES.length) Game.go(new Fight(this.sel - 1));
       else Game.go(new Story(STORY_END, () => Game.go(new Title()), 'ending'));
     }
   }
@@ -641,12 +757,12 @@ class MapScene {
     ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2;
     for (let i = 0; i < 16; i++) { const x = (i * 137 + this.t * 15) % (W + 60) - 30, y = 90 + ((i * 89) % 440); ctx.beginPath(); ctx.arc(x, y, 10, Math.PI, TAU); ctx.arc(x + 20, y, 10, Math.PI, TAU); ctx.stroke(); }
     const island = () => {
-      ctx.moveTo(40, 330); ctx.bezierCurveTo(30, 160, 260, 120, 420, 145); ctx.bezierCurveTo(600, 100, 930, 110, 935, 250);
-      ctx.bezierCurveTo(950, 400, 960, 520, 760, 520); ctx.bezierCurveTo(560, 535, 300, 530, 120, 515); ctx.bezierCurveTo(20, 500, 45, 420, 40, 330); ctx.closePath();
+      ctx.moveTo(30, 330); ctx.bezierCurveTo(20, 170, 250, 130, 420, 150); ctx.bezierCurveTo(600, 110, 930, 120, 935, 250);
+      ctx.bezierCurveTo(950, 400, 960, 520, 760, 522); ctx.bezierCurveTo(560, 537, 300, 532, 120, 517); ctx.bezierCurveTo(14, 502, 36, 420, 30, 330); ctx.closePath();
     };
     ctx.save(); ctx.translate(0, 8); ctx.beginPath(); island(); ctx.fillStyle = 'rgba(20,40,50,.3)'; ctx.fill(); ctx.restore();
     shape(island, '#d9c08a', 6, 'rgba(120,80,30,.25)', 10, 10);
-    for (const [x, y, r] of [[180, 200, 40], [460, 190, 50], [740, 200, 45], [320, 360, 35], [600, 360, 38], [860, 380, 30]]) {
+    for (const [x, y, r] of [[200, 200, 40], [460, 190, 50], [740, 200, 45], [360, 360, 35], [620, 360, 38], [860, 380, 30]]) {
       circle(x, y, r, '#9fb06a', false); ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.4, 0, TAU); ctx.fill();
     }
     // caminho
@@ -654,33 +770,38 @@ class MapScene {
     for (let i = 1; i < NODES.length; i++) ctx.lineTo(NODES[i].x, NODES[i].y);
     ctx.stroke(); ctx.setLineDash([]);
     // nós
-    const done = this.allDone();
+    const done = this.allDone(), N = BOSSES.length;
     NODES.forEach((n, i) => {
       const sel = i === this.sel;
       ctx.save(); ctx.translate(n.x, n.y - 40);
-      if (sel) ctx.scale(1.1 + Math.sin(this.t * 5) * 0.04, 1.1 + Math.sin(this.t * 5) * 0.04);
-      if (i < BOSSES.length) {
+      const bob = sel ? Math.sin(this.t * 5) * 0.04 : 0;
+      ctx.scale(1 + (sel ? 0.1 : 0) + bob, 1 + (sel ? 0.1 : 0) + bob);
+      if (i === 0) drawShopIcon(this.t, sel);
+      else if (i <= N) {
+        const B = BOSSES[i - 1];
         ink(4); rrect(-46, -44, 92, 70, 8, sel ? '#fff6e0' : PAPER);
-        ctx.font = `15px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(BOSSES[i].short, 0, -28);
-        const g = Save.data.grades[BOSSES[i].id];
-        if (g) { ctx.font = `24px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.fillText(g, 0, -2); const gd = DIFFS[(Save.data.gradeDiff || {})[BOSSES[i].id] || 'normal']; ctx.font = `11px ${FONT_TEXT}`; ctx.fillStyle = gd.color; ctx.fillText(gd.name, 0, 16); } else { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.6)'; ctx.fillText('???', 0, 2); }
-      } else {
-        ctx.translate(0, 40); ctx.scale(0.33, 0.33); drawLighthouse(0, 40, done, this.t);
-      }
+        ctx.font = `15px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(B.short, 0, -28);
+        const g = Save.data.grades[B.id];
+        if (g) { ctx.font = `24px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.fillText(g, 0, -2); const gd = DIFFS[(Save.data.gradeDiff || {})[B.id] || 'normal']; ctx.font = `11px ${FONT_TEXT}`; ctx.fillStyle = gd.color; ctx.fillText(gd.name, 0, 16); }
+        else { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.6)'; ctx.fillText('???', 0, 2); }
+        if (g) star(36, -36, 9, '#ffd84a');
+      } else { ctx.translate(0, 40); ctx.scale(0.33, 0.33); drawLighthouse(0, 40, done, this.t); }
       ctx.restore();
     });
     Game.mode.chars.forEach((c, i) => drawHero(c, this.px + (Game.mode.chars.length > 1 ? (i ? 16 : -16) : 0), this.py + 52, { dance: true, t: this.t + i * 0.4, scale: 0.75, facing: i ? -1 : 1 }));
     // painel de informações
-    ink(5); rrect(20, 18, 920, 62, 12, PAPER);
-    const N = BOSSES.length;
-    const info = this.sel < N ? `${BOSSES[this.sel].place} — ${BOSSES[this.sel].name}` : (done ? 'O Farol — leve as brasas para casa!' : `O Farol (derrote os ${N} chefões)`);
-    outlinedText('Vila Vinil', 110, 49, 30, '#ffd84a');
-    ctx.font = `19px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(info, 220, 49);
-    ctx.font = `14px ${FONT_TEXT}`; ctx.textAlign = 'right'; ctx.fillText('←/→ andar · Z entrar · Esc título', 925, 49);
-    const brasas = BOSSES.filter((b) => Save.data.grades[b.id]).length;
-    ink(4); rrect(20, 92, 150, 34, 8, PAPER);
-    ctx.font = `18px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.fillStyle = INK; ctx.fillText(`Brasas: ${brasas} / ${N}`, 95, 110);
-    const D = curDiff(); ink(4); rrect(180, 92, 200, 34, 8, PAPER);
-    ctx.font = `16px ${FONT_TITLE}`; ctx.fillStyle = D.color; ctx.fillText(`Dificuldade: ${D.name}`, 280, 110);
+    ink(5); rrect(20, 14, 920, 62, 12, PAPER);
+    const info = this.sel === 0 ? 'Empório do Seu Lampião — compre armas e amuletos'
+      : this.sel <= N ? `${BOSSES[this.sel - 1].place} — ${BOSSES[this.sel - 1].name}`
+        : (done ? 'O Farol — leve as brasas para casa!' : `O Farol (derrote os ${N} chefões)`);
+    outlinedText('Vila Vinil', 110, 45, 30, '#ffd84a');
+    ctx.font = `19px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(info, 220, 45);
+    ctx.font = `13px ${FONT_TEXT}`; ctx.textAlign = 'right'; ctx.fillText('←/→ andar · Z entrar · Esc título', 925, 66);
+    // contadores
+    const brasas = BOSSES.filter((b) => Save.data.grades[b.id]).length, D = curDiff();
+    const chip = (x, w, draw) => { ink(4); rrect(x, 86, w, 34, 9, PAPER); draw(x); };
+    chip(20, 140, (x) => { star(x + 20, 103, 10, '#ff9a2e'); ctx.font = `17px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(`Brasas ${brasas}/${N}`, x + 36, 104); });
+    chip(168, 110, (x) => { drawCoin(x + 20, 103, 10, this.t); ctx.font = `18px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(`${Save.data.coins}`, x + 38, 104); });
+    chip(286, 190, (x) => { ctx.font = `15px ${FONT_TITLE}`; ctx.fillStyle = D.color; ctx.textAlign = 'center'; ctx.fillText(`Dificuldade: ${D.name}`, x + 95, 104); });
   }
 }

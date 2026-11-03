@@ -88,6 +88,7 @@ const SONGS = {
   boss4: { bpm: 168, prog: [[60, 'maj'], [57, 'm7'], [62, 'm7'], [55, 'dom'], [60, 'maj'], [64, 'dom'], [57, 'min'], [55, 'dom']], seed: 101, lead: 'triangle' },
   boss5: { bpm: 158, prog: [[62, 'min'], [62, 'min'], [55, 'min'], [57, 'dom'], [58, 'maj'], [55, 'min'], [57, 'dom'], [57, 'dom']], seed: 131, lead: 'square' },
   boss6: { bpm: 196, prog: [[55, 'maj'], [55, 'maj'], [60, 'maj'], [62, 'dom'], [55, 'maj'], [52, 'min'], [57, 'dom'], [62, 'dom']], seed: 171, lead: 'sawtooth' },
+  shop: { bpm: 104, prog: [[62, 'm7'], [55, 'dom'], [60, 'maj'], [57, 'dom']], seed: 211, lead: 'triangle' },
   ending: { bpm: 110, prog: [[60, 'maj'], [64, 'm7'], [65, 'maj'], [67, 'dom']], seed: 5, lead: 'triangle' },
 };
 const Music = {
