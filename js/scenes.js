@@ -124,12 +124,15 @@ class Fight {
 
     if (this.state === 'intro') {
       if (!this.landed && this.stateT > 0.75) { this.landed = true; this.shake = 14; Snd.play('boom'); const c = boss.hurtCircles()[0] || { x: W * 0.75, y: GY - 100 }; Particles.puff(c.x - 80, GY - 8, 5, 18); Particles.puff(c.x + 80, GY - 8, 5, 18); }
-      boss.t += dt; for (const p of this.players) { p.anim += dt; p.ready = true; } if (this.stateT > 2.3) { this.state = 'play'; this.stateT = 0; for (const p of this.players) p.ready = false; } return; }
+      boss.t += dt; for (const p of this.players) { p.anim += dt; p.ready = true; }
+      // risada de provocação depois de pousar
+      if (this.landed && this.stateT < 2.1) { this.laughT = (this.laughT || 0) - dt; if (this.laughT <= 0) { this.laughT = 0.35; const c = boss.hurtCircles()[0] || { x: W * 0.75, y: 250 }; Particles.add({ kind: 'text', text: LAUGHS[this.def.id] || 'HA!', x: c.x + rand(-70, 30), y: c.y - 90 + rand(-20, 20), vx: rand(-30, 30), vy: -70, life: 0.9, size: 30, color: '#ffd84a' }); } } if (this.stateT > 2.3) { this.state = 'play'; this.stateT = 0; for (const p of this.players) p.ready = false; } return; }
     if (this.state === 'dead') { this.updateDeath(); return; }
 
     if (this.state === 'play') { this.stats.time += dt; for (const p of this.players) p.update(dt, this); }
     else if (this.state === 'win') for (const p of this.players) p.update(dt, this);
     boss.update(dt, this);
+    if (boss.idleFx && !boss.dead) boss.idleFx(dt, this);
     if (this.banner) this.banner.t -= dt;
     if (boss.phase !== this.lastPhase && !boss.dead) {
       this.lastPhase = boss.phase; boss.phaseT = 1.0; this.banner = { text: `FASE ${boss.phase}!`, t: 1.4 };
@@ -253,15 +256,24 @@ class Fight {
     const main = ctx, L = this.layer || (this.layer = Object.assign(document.createElement('canvas'), { width: W, height: H }));
     const lc = L.getContext('2d'); lc.setTransform(1, 0, 0, 1, 0, 0); lc.clearRect(0, 0, W, H);
     swapCtx(lc); this.boss.draw();
-    if (this.boss.flash > 0) { lc.globalCompositeOperation = 'source-atop'; lc.fillStyle = 'rgba(255,250,235,.3)'; lc.fillRect(0, 0, W, H); lc.globalCompositeOperation = 'source-over'; }
+    if (this.boss.flash > 0) { lc.globalCompositeOperation = 'source-atop'; lc.fillStyle = 'rgba(255,250,235,.16)'; lc.fillRect(0, 0, W, H); lc.globalCompositeOperation = 'source-over'; }
     swapCtx(main);
     const hc = this.boss.hurtCircles()[0];
+    if (hc && !this.boss.dead) {
+      // balança no ritmo da música, inclina para trás antes de atacar e gargalha na entrada
+      const ax = hc.x, ay = this.boss.floating ? hc.y : GY;
+      const pulse = Music.pulse(), wu = this.boss.windup || 0;
+      const laugh = this.state === 'intro' && this.landed && this.stateT < 2.1 ? Math.abs(Math.sin(this.stateT * 22)) * 0.05 : 0;
+      ctx.translate(ax, ay); ctx.rotate(wu * 0.05); ctx.scale(1 + pulse * 0.022 + laugh, 1 - pulse * 0.03 + laugh * 0.6); ctx.translate(-ax, -ay);
+    }
     if (hc && (this.boss.flash > 0 || this.boss.phaseT > 0)) {
       const pk = this.boss.phaseT > 0 ? 1 + Math.sin(this.t * 40) * 0.025 : 1.012;
       ctx.translate(hc.x, hc.y); ctx.scale(pk, 2 - pk); ctx.translate(-hc.x, -hc.y);
       if (this.boss.phaseT > 0) ctx.translate(rand(-4, 4), rand(-3, 3));
     }
+    ctx.shadowColor = 'rgba(20,10,4,.32)'; ctx.shadowOffsetX = 7; ctx.shadowOffsetY = 5;
     ctx.drawImage(L, 0, 0);
+    ctx.shadowColor = 'transparent';
     ctx.restore();
     for (const b of this.pb) drawPlayerBullet(b, this.t);
     for (const p of this.players) p.draw();

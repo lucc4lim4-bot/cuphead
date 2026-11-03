@@ -39,7 +39,13 @@ function heroPose(o) {
   const t = o.t || 0, ph = t * 14;
   let l1 = { x: -7, y: 0 }, l2 = { x: 7, y: 0 };
   if (o.run) { l1 = { x: -3 + Math.sin(ph) * 14, y: -Math.max(0, Math.cos(ph)) * 8 }; l2 = { x: 3 - Math.sin(ph) * 14, y: -Math.max(0, -Math.cos(ph)) * 8 }; }
-  if (o.air) { l1 = { x: -11, y: -9 }; l2 = { x: 10, y: -14 }; }
+  if (o.air) {
+    const vy = o.vy || 0;
+    if (vy < -120) { l1 = { x: -8, y: -12 }; l2 = { x: 9, y: -17 }; }           // subindo: pernas encolhidas
+    else if (vy > 150) { const w = Math.sin(t * 26) * 3; l1 = { x: -9, y: -2 + w }; l2 = { x: 9, y: -4 - w }; } // caindo: pernas esticadas balançando
+    else { l1 = { x: -11, y: -9 }; l2 = { x: 10, y: -13 }; }
+  }
+  if (o.idle && !o.dance) { const p = o.pulse || 0; l2 = { x: 7, y: -p * 6 }; } // bate o pé no ritmo
   if (o.dance) { const d = Math.sin(ph * 0.5); l1 = { x: -11 + d * 6, y: -Math.max(0, d) * 11 }; l2 = { x: 11 + d * 6, y: -Math.max(0, -d) * 11 }; }
   if (o.duck) { l1 = { x: -13, y: 0 }; l2 = { x: 12, y: 0 }; }
   return { ph, l1, l2, bob: o.run ? -Math.abs(Math.sin(ph)) * 3 : o.dance ? -Math.abs(Math.sin(ph * 0.5)) * 4 : 0 };
@@ -53,8 +59,12 @@ function drawHero(type, x, y, o = {}) {
   if (o.land) { sy -= o.land * 0.18; sx += o.land * 0.14; }
   if (o.air) { sy += 0.05; sx -= 0.03; }
   if (o.dash) { sx += 0.2; sy -= 0.1; }
-  if (!o.run && !o.air && !o.dash && !o.duck && !o.dance) { const br = Math.sin(t * 4) * 0.025; sy += br; sx -= br * 0.6; }
+  if (!o.run && !o.air && !o.dash && !o.duck && !o.dance) { const br = Math.sin(t * 4) * 0.02 - (o.pulse || 0) * 0.035; sy += br; sx -= br * 0.6; }
+  if (o.takeoff) { sy += o.takeoff * 0.2; sx -= o.takeoff * 0.12; }
+  if (o.turn) sx *= 1 - o.turn * 0.4;
   ctx.scale(sx, sy);
+  // linhas de velocidade do dash
+  if (o.dash) { ctx.save(); ctx.strokeStyle = 'rgba(26,20,16,.55)'; ctx.lineCap = 'round'; for (const [yy, w] of [[-58, 3], [-38, 4], [-18, 3]]) { ctx.lineWidth = w; ctx.beginPath(); ctx.moveTo(-26, yy); ctx.lineTo(-58 - Math.random() * 14, yy); ctx.stroke(); } ctx.restore(); }
   const P = heroPose(o);
   const hipY = o.duck ? -15 : -24;
 
@@ -81,12 +91,12 @@ function heroArm(sh, o, P, front) {
   if (!front) {
     const sw = o.run ? Math.sin(P.ph + Math.PI) * 10 : 0;
     hand = o.dance ? { x: sh.x - 16, y: sh.y - 12 - Math.sin(P.ph * 0.5) * 8 } : { x: sh.x - 14 - sw * 0.4, y: sh.y + 16 + Math.abs(sw) * 0.2 };
-    if (o.air) hand = { x: sh.x - 16, y: sh.y - 8 };
-    fist = true;
+    if (o.air) hand = (o.vy || 0) < -120 ? { x: sh.x - 10, y: sh.y - 24 } : (o.vy || 0) > 150 ? { x: sh.x - 22, y: sh.y - 6 + Math.sin((o.t || 0) * 30) * 5 } : { x: sh.x - 16, y: sh.y - 8 };
+    fist = !o.air || (o.vy || 0) <= 150;
   } else if (o.shooting || o.superT > 0) { hand = { x: sh.x + ax * 23, y: sh.y + ay * 23 }; }
   else if (o.parry) { hand = { x: sh.x + 4, y: sh.y - 26 }; }
   else if (o.dance) { hand = { x: sh.x + 15, y: sh.y - 14 + Math.sin(P.ph * 0.5) * 8 }; }
-  else if (o.air) { hand = { x: sh.x + 16, y: sh.y - 10 }; }
+  else if (o.air) { hand = (o.vy || 0) < -120 ? { x: sh.x + 8, y: sh.y - 26 } : (o.vy || 0) > 150 ? { x: sh.x + 22, y: sh.y - 8 + Math.cos((o.t || 0) * 30) * 5 } : { x: sh.x + 16, y: sh.y - 10 }; }
   else { const sw = o.run ? Math.sin(P.ph) * 10 : 0; hand = { x: sh.x + 15 + sw * 0.5, y: sh.y + 15 }; fist = true; }
   hose(sh.x, sh.y, hand.x, hand.y, front ? 4 : -5, 5);
   glove(hand.x, hand.y, 7, Math.atan2(hand.y - sh.y, hand.x - sh.x), fist && !o.shooting);
@@ -111,7 +121,8 @@ function drawFosforoBody(o, hipY, P, H) {
   ctx.beginPath(); ctx.moveTo(-6, hipY - 9); ctx.lineTo(-4, topY + 4); ctx.moveTo(6, hipY - 9); ctx.lineTo(5, topY + 4); ctx.stroke();
   for (const bx of [-6, 6]) { ink(1.5); circle(bx, hipY - 5, 2.4, '#ffd98a'); }
   // cabeça (pólvora)
-  const hx = 3, hy = topY - 17 + (o.dance ? Math.sin(P.ph) * 1.5 : 0);
+  const lag = o.run ? -2.5 : o.dash ? -5 : 0;
+  const hx = 3 + lag, hy = topY - 17 + (o.dance ? Math.sin(P.ph) * 1.5 : 0) + (o.run ? Math.abs(Math.sin(P.ph - 0.7)) * 2 : 0) + (o.takeoff || 0) * -3;
   const headCol = o.hurt ? '#ffffff' : '#c7362b';
   shape(pEllipse(hx, hy, 21, 20), headCol, 4.5, 'rgba(80,5,0,.38)', -8, -7);
   shine(hx - 8, hy - 10, 6, 3.5, -0.6, 0.55); shine(hx - 13, hy - 4, 1.8, 1.8, 0, 0.5);
@@ -122,7 +133,10 @@ function drawFosforoBody(o, hipY, P, H) {
   // rosto
   const blink = (t % 3.2) > 3.05 ? 1 : 0;
   const ly = o.aim && o.aim.y < -0.3 ? -1 : o.aim && o.aim.y > 0.3 ? 1 : 0;
-  pieEye(hx + 4, hy - 3, 5.5, 8.5, 1, ly, blink); pieEye(hx + 15, hy - 3, 5.5, 8.5, 1, ly, blink);
+  const look = o.idle ? Math.sin(t * 0.8) * 1.2 : 1;
+  if (o.dash || o.hurt) { ink(3); for (const ex of [hx + 4, hx + 15]) { ctx.beginPath(); ctx.moveTo(ex - 5, hy - 7); ctx.lineTo(ex + 3, hy - 3); ctx.lineTo(ex - 5, hy + 1); ctx.stroke(); } }
+  else { pieEye(hx + 4, hy - 3, 5.5, 8.5, look, ly, blink); pieEye(hx + 15, hy - 3, 5.5, 8.5, look, ly, blink); }
+  if (o.low && !o.ghost) { const dy = (t * 30) % 14; ctx.save(); ctx.globalAlpha = 1 - dy / 14; ink(2); ctx.beginPath(); ctx.moveTo(hx - 16, hy - 12 + dy); ctx.bezierCurveTo(hx - 11, hy - 6 + dy, hx - 12, hy - 1 + dy, hx - 16, hy - 1 + dy); ctx.bezierCurveTo(hx - 20, hy - 1 + dy, hx - 21, hy - 6 + dy, hx - 16, hy - 12 + dy); ctx.fillStyle = '#9fd0f0'; ctx.fill(); ctx.stroke(); ctx.restore(); }
   ink(2.5); ctx.beginPath();
   const brow = o.shooting ? 3 : 0;
   ctx.moveTo(hx, hy - 14 + brow * 0.3); ctx.quadraticCurveTo(hx + 4, hy - 16, hx + 8, hy - 13 + brow);
@@ -130,6 +144,8 @@ function drawFosforoBody(o, hipY, P, H) {
   ctx.beginPath(); ctx.ellipse(hx + 4, hy + 8, 4, 2.5, 0, 0, TAU); ctx.fillStyle = 'rgba(255,150,150,.5)'; ctx.fill();
   ink(3);
   if (o.hurt) { ellipse(hx + 12, hy + 10, 4, 5, 0, '#3b0d08'); }
+  else if (o.air && (o.vy || 0) < -120 && !o.shooting) { ellipse(hx + 12, hy + 9, 3.5, 4.5, 0, '#3b0d08'); }
+  else if (o.dash) { ctx.fillStyle = '#fffaf0'; ctx.fillRect(hx + 5, hy + 5, 13, 5); ctx.strokeRect(hx + 5, hy + 5, 13, 5); ctx.beginPath(); ctx.moveTo(hx + 9, hy + 5); ctx.lineTo(hx + 9, hy + 10); ctx.moveTo(hx + 13, hy + 5); ctx.lineTo(hx + 13, hy + 10); ctx.stroke(); }
   else if (o.shooting || o.dance) {
     ctx.beginPath(); ctx.moveTo(hx + 4, hy + 5); ctx.quadraticCurveTo(hx + 12, hy + 6, hx + 19, hy + 3); ctx.quadraticCurveTo(hx + 15, hy + 16, hx + 6, hy + 11); ctx.closePath();
     ctx.fillStyle = '#3b0d08'; ctx.fill(); ctx.stroke();
@@ -178,11 +194,17 @@ function drawCandelaBody(o, hipY, P, H) {
   // rosto
   const fy = top + 24, blink = (t % 3.5) > 3.36 ? 1 : 0;
   const ly = o.aim && o.aim.y < -0.3 ? -1 : o.aim && o.aim.y > 0.3 ? 1 : 0;
-  pieEye(1, fy, 5, 8, 1, ly, blink); pieEye(11, fy, 5, 8, 1, ly, blink);
+  const look = o.idle ? Math.sin(t * 0.8) * 1.2 : 1;
+  if (o.dash || o.hurt) { ink(3); for (const ex of [1, 11]) { ctx.beginPath(); ctx.moveTo(ex - 5, fy - 4); ctx.lineTo(ex + 3, fy); ctx.lineTo(ex - 5, fy + 4); ctx.stroke(); } }
+  else pieEye(1, fy, 5, 8, look, ly, blink), pieEye(11, fy, 5, 8, look, ly, blink);
+  // gota de cera escorrendo devagar
+  const dp = (t * 0.35) % 1; if (!o.ghost) { ctx.save(); ctx.globalAlpha = dp < 0.85 ? 1 : (1 - dp) / 0.15; ink(2); ctx.beginPath(); ctx.ellipse(12, top + 14 + dp * 26, 2.6, 3.6 + dp * 1.5, 0, 0, TAU); ctx.fillStyle = '#d6e9fb'; ctx.fill(); ctx.stroke(); ctx.restore(); }
+  if (o.low && !o.ghost) { const dy = (t * 30) % 14; ctx.save(); ctx.globalAlpha = 1 - dy / 14; ink(2); ctx.beginPath(); ctx.ellipse(-20, top + 6 + dy, 3, 4.5, 0, 0, TAU); ctx.fillStyle = '#9fd0f0'; ctx.fill(); ctx.stroke(); ctx.restore(); }
   if (!blink) { ink(1.6); for (const ex of [1, 11]) { ctx.beginPath(); ctx.moveTo(ex + 3, fy - 7); ctx.lineTo(ex + 6, fy - 10); ctx.moveTo(ex + 4.5, fy - 5); ctx.lineTo(ex + 8, fy - 7); ctx.stroke(); } }
   ctx.fillStyle = 'rgba(255,120,150,.45)'; ctx.beginPath(); ctx.ellipse(-4, fy + 9, 4, 2.5, 0, 0, TAU); ctx.ellipse(14, fy + 9, 3.5, 2.5, 0, 0, TAU); ctx.fill();
   ink(2.5);
   if (o.hurt) ellipse(7, fy + 13, 3.5, 4.5, 0, '#3b0d20');
+  else if (o.air && (o.vy || 0) < -120 && !o.shooting) ellipse(7, fy + 12, 3, 4, 0, '#3b0d20');
   else if (o.shooting || o.dance) { ctx.beginPath(); ctx.moveTo(1, fy + 10); ctx.quadraticCurveTo(7, fy + 20, 13, fy + 10); ctx.closePath(); ctx.fillStyle = '#3b0d20'; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.ellipse(7, fy + 14.5, 2.5, 1.5, 0, 0, TAU); ctx.fillStyle = '#ff7a90'; ctx.fill(); }
   else { ctx.beginPath(); ctx.arc(7, fy + 8, 5, 0.4, Math.PI - 0.4); ctx.stroke(); }
   heroArm(sh, o, P, true);
