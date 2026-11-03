@@ -21,6 +21,7 @@ class Options {
       { label: 'Volume da música', val: () => volBar(o.music), adj: (d) => { o.music = clamp(o.music + d, 0, 10); Snd.applyVolume(); } },
       { label: 'Volume dos efeitos', val: () => volBar(o.sfx), adj: (d) => { o.sfx = clamp(o.sfx + d, 0, 10); Snd.applyVolume(); Snd.play('select'); } },
       { label: 'Som geral', val: () => (Save.data.muted ? 'Mudo' : 'Ligado'), adj: () => Snd.toggleMute() },
+      { label: 'Barra de vida do chefão', val: () => (o.bossBar ? 'Ligada' : 'Desligada'), adj: toggle('bossBar') },
       { label: 'Tremor de tela', val: () => (o.shake ? 'Ligado' : 'Desligado'), adj: toggle('shake') },
       { label: 'Efeito de filme antigo', val: () => (o.film ? 'Ligado' : 'Desligado'), adj: toggle('film') },
       { label: 'Botões de toque na tela', val: () => ({ auto: 'Automático', on: 'Sempre', off: 'Nunca' })[o.touch], adj: (d) => { const m = ['auto', 'on', 'off']; o.touch = m[(m.indexOf(o.touch) + (d < 0 ? 2 : 1)) % 3]; Touch.apply(); } },
@@ -66,7 +67,7 @@ class Options {
     drawPanel('OPÇÕES', x, y, w, h);
     const it = this.items();
     it.forEach((row, i) => {
-      const yy = y + 84 + i * 25, sel = i === this.sel;
+      const yy = y + 82 + i * 24, sel = i === this.sel;
       if (sel) { ctx.fillStyle = 'rgba(200,53,43,.14)'; ctx.fillRect(x + 22, yy - 13, w - 44, 26); }
       ctx.font = `${sel ? 19 : 17}px ${FONT_TITLE}`; ctx.textBaseline = 'middle';
       ctx.textAlign = 'left'; ctx.fillStyle = sel ? '#c8352b' : INK; ctx.fillText((sel ? '► ' : '') + row.label, x + 34, yy);

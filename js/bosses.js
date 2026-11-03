@@ -142,6 +142,7 @@ class Boss {
       this.lookY = lerp(this.lookY || 0, clamp((tp.y - 50 - this.y) / 220, -1, 1), dt * 5);
     }
     if (this.dead) { this.deathT += dt; return false; }
+    if (this.phaseT > 0) { this.phaseT -= dt; return true; }
     this.tickQ(dt); this.cd -= dt;
     if (this.cd <= 0 && this.q.length === 0) { this.seq++; f.pickTarget(); this.windup = 1; this.attack(f); if (f.diff) this.cd *= f.diff.cd; }
     return true;

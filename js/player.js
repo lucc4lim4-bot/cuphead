@@ -13,11 +13,18 @@ class Player {
     this.duck = false; this.aim = { x: 1, y: 0 }; this.anim = Math.random() * 3; this.land = 0; this.superT = 0; this.exT = 0;
     this.shooting = false; this.hurtT = 0;
     this.ghost = false; this.ghostT = 0; this.gone = false;
+    // equipamento comprado na loja
+    const lo = (typeof loadoutOf === 'function') ? loadoutOf(type) : { weapon: null, charm: null };
+    this.weapon = lo.weapon; this.charm = lo.charm;
+    this.dmgMul = this.charm === 'c_heart' ? 0.95 : 1;
+    this.parryWin = this.charm === 'c_magnet' ? 0.36 : 0.22; this.parryR = this.charm === 'c_magnet' ? 34 : 16;
+    this.bubble = this.charm === 'c_bubble'; this.bubbleT = 0; this.doubleUsed = false;
+    this.trail = []; this.recoil = 0; this.spin = 0;
   }
   get alive() { return this.hp > 0; }
   box() {
-    const h = this.duck ? 34 : 62;
-    return { x: this.x - 13, y: this.y - h, w: 26, h };
+    const h = this.duck ? 32 : 58;
+    return { x: this.x - 11, y: this.y - h, w: 22, h };
   }
   shoulder() {
     const up = this.type === 'candela' ? (this.duck ? 30 : 46) : (this.duck ? 26 : 46);
@@ -37,6 +44,13 @@ class Player {
     this.land = Math.max(0, this.land - dt * 5);
     this.inv = Math.max(0, this.inv - dt); this.dashCd -= dt; this.shootCd -= dt; this.exT -= dt; this.hurtT -= dt;
     if (this.parryT > 0) this.parryT -= dt;
+    this.recoil = Math.max(0, this.recoil - dt * 12);
+    if (this.charm === 'c_coffee' && this.superT <= 0) this.meter = Math.min(5, this.meter + 0.07 * dt);
+    if (this.charm === 'c_bubble' && !this.bubble) { this.bubbleT -= dt; if (this.bubbleT <= 0) { this.bubble = true; Snd.play('parry'); Particles.stars(this.x, this.y - 40, 6, '#9fd0f0'); } }
+    // rastro do dash
+    if (this.dashT > 0 && Math.floor(this.anim * 40) % 2 === 0) this.trail.push({ x: this.x, y: this.y, f: this.facing, life: 0.22 });
+    for (const g of this.trail) g.life -= dt;
+    this.trail = this.trail.filter((g) => g.life > 0);
 
     // ---- Super: labareda gigante ----
     if (this.superT > 0) {
@@ -76,7 +90,11 @@ class Player {
     // ---- Pulo / rebote ----
     if (Pr.jump && this.dashT <= 0) {
       if (this.onGround) { this.vy = -P.jumpV; this.onGround = false; this.jumpHeld = true; Snd.play('jump'); }
-      else if (!this.parryUsed) { this.parryT = 0.22; this.parryUsed = true; }
+      else if (this.charm === 'c_spring' && !this.doubleUsed) {
+        this.doubleUsed = true; this.vy = -560; this.jumpHeld = true; this.parryT = this.parryWin; this.parryUsed = true;
+        Snd.play('jump'); Particles.puff(this.x, this.y, 3, 8);
+      }
+      else if (!this.parryUsed) { this.parryT = this.parryWin; this.parryUsed = true; }
     }
     if (!I.jump && this.jumpHeld && this.vy < -260) { this.vy = -260; this.jumpHeld = false; }
 
@@ -84,14 +102,14 @@ class Player {
     if (Pr.dash && this.dashCd <= 0 && (this.onGround || !this.airDashUsed)) {
       this.dashT = P.dashT; this.dashCd = 0.5; this.dashDir = this.facing;
       if (!this.onGround) this.airDashUsed = true;
-      this.parryT = 0; Snd.play('dash'); Particles.puff(this.x, this.y - 30, 4, 12);
+      this.parryT = 0; Snd.play('dash'); Particles.puff(this.x, this.y - 30, 4, 12, this.charm === 'c_smoke' ? '#b8b2a8' : '#fffaf0');
     }
 
     this.x += this.vx * dt + (f.wind || 0) * dt; this.y += this.vy * dt;
     this.x = clamp(this.x, 22, (f.arenaR || W) - 22);
     if (this.y >= GY) {
       if (!this.onGround) { this.land = 1; Particles.puff(this.x, GY - 4, 3, 9); }
-      this.y = GY; this.vy = 0; this.onGround = true; this.parryUsed = false; this.airDashUsed = false; this.jumpHeld = false;
+      this.y = GY; this.vy = 0; this.onGround = true; this.parryUsed = false; this.airDashUsed = false; this.jumpHeld = false; this.doubleUsed = false;
     } else this.onGround = false;
     if (this.onGround && Math.abs(this.vx) > 10 && this.dashT <= 0) {
       this.dustT = (this.dustT || 0) - dt;
@@ -118,26 +136,51 @@ class Player {
   }
 
   fire(f) {
-    const s = this.shoulder(), a0 = Math.atan2(this.aim.y, this.aim.x);
+    const s = this.shoulder(), a0 = Math.atan2(this.aim.y, this.aim.x), m = this.dmgMul;
+    this.recoil = 1;
+    const base = { hero: this.type, from: this };
+    if (this.weapon === 'w_homing') {
+      this.shootCd = 0.13;
+      const a = a0 + rand(-0.15, 0.15);
+      f.pb.push(Object.assign({ x: s.x + this.aim.x * 30, y: s.y + this.aim.y * 30, vx: Math.cos(a) * 640, vy: Math.sin(a) * 640, r: 9, dmg: 0.75 * m, life: 1.8, kind: 'homing', homing: true }, base));
+      Snd.play('shoot'); return;
+    }
+    if (this.weapon === 'w_twin') {
+      this.shootCd = 0.12;
+      const px = -this.aim.y, py = this.aim.x;
+      for (const k of [-9, 9]) f.pb.push(Object.assign({ x: s.x + this.aim.x * 30 + px * k, y: s.y + this.aim.y * 30 + py * k, vx: this.aim.x * P.bulletV, vy: this.aim.y * P.bulletV, r: 8, dmg: 0.58 * m, life: 1.2, kind: 'spark' }, base));
+      Snd.play('shoot'); return;
+    }
+    if (this.weapon === 'w_bomb') {
+      this.shootCd = 0.36;
+      f.pb.push(Object.assign({ x: s.x + this.aim.x * 28, y: s.y + this.aim.y * 28 - 6, vx: this.aim.x * 720, vy: this.aim.y * 600 - 400, grav: 1150, r: 12, dmg: 2.7 * m, life: 2.2, kind: 'bomb' }, base));
+      Snd.play('shoot2'); return;
+    }
     if (this.type === 'candela') {
       // leque de 3 gotas de cera: curto alcance, mais dano somado
       this.shootCd = 0.16;
       for (const da of [-0.2, 0, 0.2]) {
         const a = a0 + da + rand(-0.03, 0.03);
-        f.pb.push({ x: s.x + this.aim.x * 26, y: s.y + this.aim.y * 26, vx: Math.cos(a) * 800, vy: Math.sin(a) * 800, r: 10, dmg: 0.6, life: 0.42, kind: 'wax', hero: this.type, from: this });
+        f.pb.push({ x: s.x + this.aim.x * 26, y: s.y + this.aim.y * 26, vx: Math.cos(a) * 800, vy: Math.sin(a) * 800, r: 10, dmg: 0.6 * m, life: 0.42, kind: 'wax', hero: this.type, from: this });
       }
       Snd.play('shoot2');
     } else {
       this.shootCd = 0.11;
       const a = a0 + rand(-0.05, 0.05);
-      f.pb.push({ x: s.x + this.aim.x * 30, y: s.y + this.aim.y * 30, vx: Math.cos(a) * P.bulletV, vy: Math.sin(a) * P.bulletV, r: 9, dmg: 1, life: 1.2, kind: 'spark', hero: this.type, from: this });
+      f.pb.push({ x: s.x + this.aim.x * 30, y: s.y + this.aim.y * 30, vx: Math.cos(a) * P.bulletV, vy: Math.sin(a) * P.bulletV, r: 9, dmg: 1 * m, life: 1.2, kind: 'spark', hero: this.type, from: this });
       Snd.play('shoot');
     }
   }
 
   hurt(f) {
     if (this.inv > 0 || this.superT > 0 || !this.alive || this.ghost) return;
-    this.hp--; this.inv = 1.8; this.hurtT = 0.35; this.dashT = 0;
+    if (this.charm === 'c_smoke' && this.dashT > 0) return;
+    if (this.bubble) {
+      this.bubble = false; this.bubbleT = 25; this.inv = 1.2;
+      Snd.play('poof'); f.shake = 6; Particles.stars(this.x, this.y - 40, 10, '#9fd0f0'); Particles.puff(this.x, this.y - 40, 4, 14, '#d8eefa');
+      return;
+    }
+    this.hp--; this.inv = 2.2; this.hurtT = 0.35; this.dashT = 0;
     this.vy = -360; this.onGround = false;
     f.shake = 12; f.hitstop = 0.12; Snd.play('hurt');
     Particles.stars(this.x, this.y - 40, 8, '#ff6a3a');
@@ -161,13 +204,35 @@ class Player {
     }
     if (!this.alive) return;
     groundShadow(this.x, clamp(22 - (GY - this.y) * 0.06, 8, 22), 0.3);
-    if (this.inv > 0 && this.superT <= 0 && Math.floor(this.inv * 18) % 2 === 0) return;
+    // fantasmas do dash
+    for (const g of this.trail) {
+      ctx.save(); ctx.globalAlpha = (g.life / 0.22) * 0.35;
+      drawHero(this.type, g.x, g.y, { facing: g.f, t: this.anim, dash: true, ghost: false });
+      ctx.restore();
+    }
+    const blinkOut = this.inv > 0 && this.superT <= 0 && Math.floor(this.inv * 18) % 2 === 0;
+    if (!blinkOut) this.drawBody();
+    if (this.bubble) {
+      const r = 46 + Math.sin(this.anim * 4) * 2;
+      ctx.save(); ctx.fillStyle = 'rgba(160,210,255,.2)'; ctx.beginPath(); ctx.arc(this.x, this.y - 34, r, 0, TAU); ctx.fill();
+      ctx.strokeStyle = 'rgba(200,235,255,.8)'; ctx.lineWidth = 2.5; ctx.stroke(); shine(this.x - 16, this.y - 58, 9, 4, -0.6, 0.6); ctx.restore();
+    }
+    if (this.superT > 0) this.drawSuper();
+  }
+
+  drawBody() {
+    // giro do rebote, recuo do tiro e tombo ao levar dano
+    ctx.save();
+    const cy = this.y - 34;
+    if (this.parryT > 0) { const k = 1 - this.parryT / this.parryWin; ctx.translate(this.x, cy); ctx.rotate(k * TAU * this.facing); ctx.translate(-this.x, -cy); }
+    if (this.hurtT > 0) { ctx.translate(this.x, cy); ctx.rotate(-this.facing * 0.6 * (this.hurtT / 0.35)); ctx.translate(-this.x, -cy); }
+    if (this.recoil > 0) ctx.translate(-this.facing * this.recoil * 2.5, 0);
     drawHero(this.type, this.x, this.y, {
       facing: this.facing, aim: this.aim, run: this.onGround && Math.abs(this.vx) > 10, air: !this.onGround,
       duck: this.duck, t: this.anim, land: this.land, dash: this.dashT > 0, shooting: this.shooting || this.exT > 0,
-      parry: this.parryT > 0, hurt: this.hurtT > 0, superT: this.superT, vx: this.vx, dance: this.victory && this.onGround,
+      parry: this.parryT > 0, hurt: this.hurtT > 0, superT: this.superT, vx: this.vx, dance: (this.victory || this.ready) && this.onGround,
     });
-    if (this.superT > 0) this.drawSuper();
+    ctx.restore();
   }
 
   drawSuper() {

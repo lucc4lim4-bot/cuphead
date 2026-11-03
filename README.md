@@ -25,16 +25,32 @@ Em Vila Vinil, a Chama Eterna do Farol se apagou e seis brasas mágicas foram ro
 - **1 Jogador**: escolha Fósforo ou Candela.
 - **2 Jogadores** (cooperativo local): cada um controla um herói. Quem perder toda a vida vira fantasma; o parceiro **rebate o coração rosa** do fantasma para revivê-lo. Os chefões ficam mais resistentes.
 
+## Loja do Seu Lampião
+
+No mapa, o primeiro ponto é o **Empório do Seu Lampião**. Vença chefões para ganhar **moedas** (mais moedas na primeira vitória, com nota alta e em dificuldades maiores; chegar à fase 3 e perder dá 1 moeda de consolação) e compre itens. Cada herói equipa **1 arma** e **1 amuleto** (tecla C troca o herói na loja).
+
+| Item | Tipo | Preço | Efeito |
+|---|---|---|---|
+| Rajada Teleguiada | Arma | 4 | Faíscas que perseguem o chefão |
+| Tiro Duplo | Arma | 5 | Duas faíscas paralelas |
+| Bombinha | Arma | 5 | Bombas em arco com explosão em área |
+| Coração Extra | Amuleto | 3 | +1 PV (tiro 5% mais fraco) |
+| Cafezinho | Amuleto | 3 | Medidor de chamas enche sozinho |
+| Bomba de Fumaça | Amuleto | 4 | Dash invencível |
+| Ímã Rosa | Amuleto | 2 | Rebote mais fácil |
+| Bolha Protetora | Amuleto | 5 | Absorve 1 golpe e volta em 25 s |
+| Sapato de Mola | Amuleto | 4 | Pulo duplo (que também rebate) |
+
 ## Dificuldade
 
 Escolha na seleção de personagem (↑/↓) ou em **Opções**:
 
 | Nível | Vida | Chefões |
 |---|---|---|
-| **Fácil** | 4 PV | 28% menos vida, ataques mais espaçados e projéteis mais lentos (nota máxima B) |
-| **Normal** | 3 PV | o desafio padrão |
-| **Difícil** | 3 PV | 30% mais vida, atacam mais rápido e projéteis mais velozes |
-| **Pesadelo** | 1 PV | 45% mais vida e ainda mais agressivos |
+| **Fácil** | 5 PV | bem mais fracos, ataques espaçados e projéteis lentos (nota máxima B) |
+| **Normal** | 4 PV | o desafio padrão |
+| **Difícil** | 3 PV | mais resistentes, rápidos e agressivos |
+| **Pesadelo** | 1 PV | ainda mais resistentes e agressivos |
 
 O mapa mostra a melhor nota de cada chefão e em qual dificuldade ela foi conseguida.
 
@@ -42,7 +58,7 @@ O mapa mostra a melhor nota de cada chefão e em qual dificuldade ela foi conseg
 
 No título ou na pausa, em **Opções**:
 
-- Dificuldade, volume da música e dos efeitos, som geral, tremor de tela e efeito de filme antigo.
+- Dificuldade, barra de vida do chefão, volume da música e dos efeitos, som geral, tremor de tela e efeito de filme antigo.
 - **Botões de toque**: mostrar sempre, nunca ou automático; **opacidade**, **tamanho** e **posição** (modo de edição: arraste cada botão para onde quiser).
 - **Direção na tela**: **joystick fixo**, **joystick flutuante** (aparece onde o polegar encosta no lado esquerdo da tela) ou **setas**. O joystick mira em 8 direções e também pode ser arrastado no modo de edição.
 - **Teclas**: troque qualquer tecla do modo 1 jogador e de cada jogador do modo 2 jogadores.
@@ -102,6 +118,7 @@ Se for a primeira vez, ative em **Settings → Pages → Build and deployment �
 - `js/bosses.js`: projéteis e comportamento dos três chefões
 - `js/boss-art.js`: desenho detalhado dos chefões 1 a 3
 - `js/bosses2.js`: chefões 4 a 6 (comportamento, arte e cenários)
+- `js/shop.js`: loja, moedas, itens e o lojista
 - `js/options.js`: telas de opções e de troca de teclas
 - `js/scenes.js`: cenários, luta, título, seleção de personagem, história, mapa e resultados
 - `js/main.js`: laço principal e transições
