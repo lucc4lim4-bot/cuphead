@@ -101,3 +101,53 @@ body.editing #touchbar {
 #touchbar button { font: 15px "Special Elite", monospace; padding: 6px 12px; border: 3px solid var(--ink); border-radius: 8px; background: #fff6e0; color: var(--ink); cursor: pointer; }
 #touchbar button.primary { background: #c8352b; color: #fff6e0; }
 body.editing #touchbar.bottom { top: auto; bottom: 4%; }
+
+/* ---------- Joystick virtual ---------- */
+#stick, #stickzone { display: none; }
+#stick {
+  --s: 1;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: calc(124px * var(--s));
+  height: calc(124px * var(--s));
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  background: radial-gradient(circle, rgba(233, 214, 168, .35) 0 45%, rgba(233, 214, 168, .8) 46% 100%);
+  box-shadow: inset 0 0 0 calc(10px * var(--s)) rgba(26, 20, 16, .12);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  z-index: 2;
+}
+#stick::before {
+  content: "";
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 72%; height: 72%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 2px dashed rgba(26, 20, 16, .35);
+}
+#stick .knob {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: calc(58px * var(--s));
+  height: calc(58px * var(--s));
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 3px solid var(--ink);
+  background: radial-gradient(circle at 35% 30%, #fff6e0 0 18%, #e2b874 45%, #b8322a 100%);
+  box-shadow: 0 3px 0 rgba(0,0,0,.35);
+  pointer-events: none;
+}
+#stick.active .knob { box-shadow: 0 1px 0 rgba(0,0,0,.35); }
+#stickzone { position: absolute; left: 0; top: 14%; width: 46%; height: 86%; pointer-events: auto; touch-action: none; z-index: 1; }
+body.touch.dir-stick #stick, body.touch.dir-float #stick { display: block; }
+body.touch.dir-float:not(.editing) #stickzone { display: block; }
+body.touch.dir-stick #touch button[data-k="up"], body.touch.dir-stick #touch button[data-k="down"],
+body.touch.dir-stick #touch button[data-k="left"], body.touch.dir-stick #touch button[data-k="right"],
+body.touch.dir-float #touch button[data-k="up"], body.touch.dir-float #touch button[data-k="down"],
+body.touch.dir-float #touch button[data-k="left"], body.touch.dir-float #touch button[data-k="right"] { display: none; }
+#touch button[data-k] { z-index: 3; }
+body.editing #stick { outline: 3px dashed #ffd84a; outline-offset: 3px; cursor: grab; }

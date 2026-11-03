@@ -44,6 +44,7 @@ No título ou na pausa, em **Opções**:
 
 - Dificuldade, volume da música e dos efeitos, som geral, tremor de tela e efeito de filme antigo.
 - **Botões de toque**: mostrar sempre, nunca ou automático; **opacidade**, **tamanho** e **posição** (modo de edição: arraste cada botão para onde quiser).
+- **Direção na tela**: **joystick fixo**, **joystick flutuante** (aparece onde o polegar encosta no lado esquerdo da tela) ou **setas**. O joystick mira em 8 direções e também pode ser arrastado no modo de edição.
 - **Teclas**: troque qualquer tecla do modo 1 jogador e de cada jogador do modo 2 jogadores.
 
 ## Controles
@@ -70,7 +71,7 @@ No título ou na pausa, em **Opções**:
 
 Controles (gamepads) também funcionam: controle 1 = J1, controle 2 = J2 (A pular, X atirar, RB dash, B EX, LT travar, Start pausa).
 
-Em celulares aparecem botões na tela (1 jogador).
+Em celulares aparecem um joystick virtual e botões na tela (1 jogador).
 
 Ao vencer, você recebe uma nota (D até S) calculada pelo tempo, pela vida restante, pelos rebotes e pelas chamas usadas. O progresso fica salvo no navegador.
 

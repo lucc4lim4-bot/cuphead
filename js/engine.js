@@ -31,7 +31,7 @@ const DIFFS = {
   nightmare: { name: 'Pesadelo', color: '#6a2a8a', lives: 1, hp: 1.45, cd: 0.68, speed: 1.25, desc: '1 PV · um toque e acabou. Boa sorte!' },
 };
 const DIFF_ORDER = ['easy', 'normal', 'hard', 'nightmare'];
-const OPT_DEFAULTS = { diff: 'normal', music: 7, sfx: 8, shake: true, film: true, touch: 'auto', tOpacity: 0.55, tScale: 1, tPos: {} };
+const OPT_DEFAULTS = { dir: 'stick', diff: 'normal', music: 7, sfx: 8, shake: true, film: true, touch: 'auto', tOpacity: 0.55, tScale: 1, tPos: {} };
 Save.data.opt = Object.assign({}, OPT_DEFAULTS, Save.data.opt || {});
 const opt = () => Save.data.opt;
 const curDiff = () => DIFFS[opt().diff] || DIFFS.normal;
@@ -138,7 +138,71 @@ const Pads = {
 // ---------- Controles de toque (posição, tamanho e opacidade configuráveis) ----------
 const TOUCH_DEFAULT_POS = {
   up: [13, 63], left: [6, 79], right: [20, 79], down: [13, 93],
-  lock: [70, 92], shoot: [82, 86], jump: [93, 78], dash: [82, 66], ex: [93, 58], pause: [96, 8],
+  stick: [13, 76], lock: [70, 92], shoot: [82, 86], jump: [93, 78], dash: [82, 66], ex: [93, 58], pause: [96, 8],
+};
+const capture = (el, id) => { try { el.setPointerCapture(id); } catch (e) { /* ponteiro já liberado */ } };
+const DIR_NAMES = { stick: 'Joystick fixo', float: 'Joystick flutuante', pad: 'Setas' };
+// Joystick virtual: converte a posição do polegar em esquerda/direita/cima/baixo (8 direções)
+const Stick = {
+  el: null, knob: null, zone: null, id: null, cx: 0, cy: 0, R: 1, dirs: { left: false, right: false, up: false, down: false },
+  init(stage) {
+    this.stage = stage; this.el = document.getElementById('stick'); this.zone = document.getElementById('stickzone');
+    if (!this.el) return;
+    this.knob = this.el.querySelector('.knob');
+    let drag = null;
+    this.el.addEventListener('pointerdown', (e) => {
+      e.preventDefault(); e.stopPropagation(); Snd.init();
+      capture(this.el, e.pointerId);
+      if (Touch.editing) { drag = e.pointerId; this.el.classList.add('active'); return; }
+      if (opt().dir === 'float') this.begin(e, e.clientX, e.clientY); else this.begin(e);
+    });
+    this.el.addEventListener('pointermove', (e) => {
+      if (drag === e.pointerId && Touch.editing) { Touch.dragTo('stick', e); return; }
+      this.move(e);
+    });
+    const end = (e) => { if (drag === e.pointerId) { drag = null; this.el.classList.remove('active'); return; } this.end(e); };
+    this.el.addEventListener('pointerup', end); this.el.addEventListener('pointercancel', end);
+    this.el.addEventListener('contextmenu', (e) => e.preventDefault());
+    // modo flutuante: o joystick nasce onde o polegar encosta
+    this.zone.addEventListener('pointerdown', (e) => {
+      if (Touch.editing || opt().dir !== 'float') return;
+      e.preventDefault(); Snd.init(); capture(this.zone, e.pointerId); this.begin(e, e.clientX, e.clientY);
+    });
+    this.zone.addEventListener('pointermove', (e) => this.move(e));
+    this.zone.addEventListener('pointerup', (e) => this.end(e)); this.zone.addEventListener('pointercancel', (e) => this.end(e));
+  },
+  begin(e, x, y) {
+    if (this.id !== null) return;
+    this.id = e.pointerId;
+    if (x !== undefined) {
+      const r = this.stage.getBoundingClientRect();
+      this.el.style.left = ((x - r.left) / r.width) * 100 + '%'; this.el.style.top = ((y - r.top) / r.height) * 100 + '%';
+      this.cx = x; this.cy = y;
+    }
+    const b = this.el.getBoundingClientRect();
+    if (x === undefined) { this.cx = b.left + b.width / 2; this.cy = b.top + b.height / 2; }
+    this.R = b.width / 2;
+    this.el.classList.add('active'); this.el.style.opacity = Math.max(0.5, opt().tOpacity);
+    this.move(e);
+  },
+  move(e) {
+    if (e.pointerId !== this.id) return;
+    let dx = e.clientX - this.cx, dy = e.clientY - this.cy;
+    const m = Math.hypot(dx, dy), max = this.R * 0.8;
+    if (m > max) { dx *= max / m; dy *= max / m; }
+    this.knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+    const nx = dx / max, ny = dy / max;
+    this.set({ left: nx < -0.35, right: nx > 0.35, up: ny < -0.45, down: ny > 0.55 });
+  },
+  set(d) {
+    for (const k in d) if (d[k] !== this.dirs[k]) { if (d[k]) press(0, k); else release(0, k); this.dirs[k] = d[k]; }
+  },
+  end(e) {
+    if (e.pointerId !== this.id) return;
+    this.id = null; this.knob.style.transform = 'translate(-50%, -50%)';
+    this.set({ left: false, right: false, up: false, down: false });
+    this.el.classList.remove('active'); Touch.apply();
+  },
 };
 const Touch = {
   isTouchDevice: 'ontouchstart' in window || navigator.maxTouchPoints > 0,
@@ -154,16 +218,33 @@ const Touch = {
       b.style.setProperty('--s', o.tScale);
       b.style.opacity = this.editing ? Math.max(0.6, o.tOpacity) : o.tOpacity;
     });
+    // joystick virtual
+    const dm = o.dir || 'stick';
+    for (const m of ['pad', 'stick', 'float']) document.body.classList.toggle('dir-' + m, dm === m);
+    const st = document.getElementById('stick');
+    if (st && Stick.id === null) {
+      const pos = (o.tPos && o.tPos.stick) || TOUCH_DEFAULT_POS.stick;
+      st.style.left = pos[0] + '%'; st.style.top = pos[1] + '%';
+      st.style.setProperty('--s', o.tScale);
+      st.style.opacity = this.editing ? Math.max(0.6, o.tOpacity) : (dm === 'float' ? o.tOpacity * 0.55 : o.tOpacity);
+    }
+    const db = document.getElementById('tb-dir'); if (db) db.textContent = 'Direção: ' + DIR_NAMES[dm];
     const op = document.getElementById('tb-opacity'), sz = document.getElementById('tb-size');
     if (op) op.value = Math.round(o.tOpacity * 100);
     if (sz) sz.value = Math.round(o.tScale * 100);
   },
-  startEdit(onDone) { this.editing = true; this.onDone = onDone; this.backup = JSON.stringify({ p: opt().tPos, o: opt().tOpacity, s: opt().tScale }); this.apply(); },
+  startEdit(onDone) { this.editing = true; this.onDone = onDone; this.backup = JSON.stringify({ p: opt().tPos, o: opt().tOpacity, s: opt().tScale, d: opt().dir }); this.apply(); },
   endEdit(save) {
-    if (!save) { const b = JSON.parse(this.backup); opt().tPos = b.p || {}; opt().tOpacity = b.o; opt().tScale = b.s; }
+    if (!save) { const b = JSON.parse(this.backup); opt().tPos = b.p || {}; opt().tOpacity = b.o; opt().tScale = b.s; opt().dir = b.d; }
     Save.write(); this.editing = false; this.apply(); const d = this.onDone; this.onDone = null; if (d) d();
   },
-  resetLayout() { opt().tPos = {}; opt().tOpacity = OPT_DEFAULTS.tOpacity; opt().tScale = 1; this.apply(); },
+  dragTo(k, e) {
+    const r = document.getElementById('stage').getBoundingClientRect();
+    const x = clamp(((e.clientX - r.left) / r.width) * 100, 3, 97), y = clamp(((e.clientY - r.top) / r.height) * 100, 4, 96);
+    opt().tPos = Object.assign({}, opt().tPos, { [k]: [Math.round(x * 10) / 10, Math.round(y * 10) / 10] });
+    this.apply();
+  },
+  resetLayout() { opt().tPos = {}; opt().tOpacity = OPT_DEFAULTS.tOpacity; opt().tScale = 1; opt().dir = OPT_DEFAULTS.dir; this.apply(); },
   init() {
     const stage = document.getElementById('stage');
     document.querySelectorAll('#touch button[data-k]').forEach((b) => {
@@ -171,15 +252,12 @@ const Touch = {
       let drag = null;
       const down = (e) => {
         e.preventDefault(); Snd.init();
-        if (this.editing) { b.setPointerCapture(e.pointerId); drag = { id: e.pointerId }; b.classList.add('on'); return; }
+        if (this.editing) { capture(b, e.pointerId); drag = { id: e.pointerId }; b.classList.add('on'); return; }
         press(k === 'pause' ? -1 : 0, k); if (k === 'jump') press(-1, 'start'); b.classList.add('on');
       };
       const move = (e) => {
         if (!drag || !this.editing) return;
-        const r = stage.getBoundingClientRect();
-        const x = clamp(((e.clientX - r.left) / r.width) * 100, 3, 97), y = clamp(((e.clientY - r.top) / r.height) * 100, 4, 96);
-        opt().tPos = Object.assign({}, opt().tPos, { [k]: [Math.round(x * 10) / 10, Math.round(y * 10) / 10] });
-        this.apply();
+        this.dragTo(k, e);
       };
       const up = (e) => {
         e.preventDefault(); b.classList.remove('on');
@@ -197,7 +275,9 @@ const Touch = {
     on('tb-save', 'click', () => this.endEdit(true));
     on('tb-cancel', 'click', () => this.endEdit(false));
     on('tb-reset', 'click', () => this.resetLayout());
+    on('tb-dir', 'click', () => { const m = ['stick', 'float', 'pad']; opt().dir = m[(m.indexOf(opt().dir) + 1) % 3]; this.apply(); });
     on('tb-flip', 'click', () => document.getElementById('touchbar').classList.toggle('bottom'));
+    Stick.init(stage);
     cv.addEventListener('pointerdown', () => { if (this.editing) return; Snd.init(); press(-1, 'start'); setTimeout(() => release(-1, 'start'), 60); });
     this.apply();
   },

@@ -24,6 +24,7 @@ class Options {
       { label: 'Tremor de tela', val: () => (o.shake ? 'Ligado' : 'Desligado'), adj: toggle('shake') },
       { label: 'Efeito de filme antigo', val: () => (o.film ? 'Ligado' : 'Desligado'), adj: toggle('film') },
       { label: 'Botões de toque na tela', val: () => ({ auto: 'Automático', on: 'Sempre', off: 'Nunca' })[o.touch], adj: (d) => { const m = ['auto', 'on', 'off']; o.touch = m[(m.indexOf(o.touch) + (d < 0 ? 2 : 1)) % 3]; Touch.apply(); } },
+      { label: 'Direção na tela', val: () => DIR_NAMES[o.dir] || DIR_NAMES.stick, adj: (d) => { const m = ['stick', 'float', 'pad']; o.dir = m[(m.indexOf(o.dir) + (d < 0 ? 2 : 1)) % 3]; Touch.apply(); } },
       { label: 'Opacidade dos botões', val: () => `${Math.round(o.tOpacity * 100)}%`, adj: (d) => { o.tOpacity = clamp(Math.round((o.tOpacity + d * 0.05) * 100) / 100, 0.1, 1); Touch.apply(); } },
       { label: 'Tamanho dos botões', val: () => `${Math.round(o.tScale * 100)}%`, adj: (d) => { o.tScale = clamp(Math.round((o.tScale + d * 0.05) * 100) / 100, 0.6, 1.6); Touch.apply(); } },
       { label: 'Posição dos botões', val: () => 'Arrastar ►', act: () => { this.editing = true; Touch.startEdit(() => { this.editing = false; this.msg = 'Layout dos botões salvo.'; }); } },
@@ -65,7 +66,7 @@ class Options {
     drawPanel('OPÇÕES', x, y, w, h);
     const it = this.items();
     it.forEach((row, i) => {
-      const yy = y + 86 + i * 26, sel = i === this.sel;
+      const yy = y + 84 + i * 25, sel = i === this.sel;
       if (sel) { ctx.fillStyle = 'rgba(200,53,43,.14)'; ctx.fillRect(x + 22, yy - 13, w - 44, 26); }
       ctx.font = `${sel ? 19 : 17}px ${FONT_TITLE}`; ctx.textBaseline = 'middle';
       ctx.textAlign = 'left'; ctx.fillStyle = sel ? '#c8352b' : INK; ctx.fillText((sel ? '► ' : '') + row.label, x + 34, yy);
