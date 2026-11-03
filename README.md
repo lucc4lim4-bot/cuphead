@@ -119,6 +119,7 @@ Se for a primeira vez, ative em **Settings → Pages → Build and deployment �
 - `js/boss-art.js`: desenho detalhado dos chefões 1 a 3
 - `js/bosses2.js`: chefões 4 a 6 (comportamento, arte e cenários)
 - `js/shop.js`: loja, moedas, itens e o lojista
+- `js/boss-fx.js`: efeitos de ambiente e risadas dos chefões
 - `js/options.js`: telas de opções e de troca de teclas
 - `js/scenes.js`: cenários, luta, título, seleção de personagem, história, mapa e resultados
 - `js/main.js`: laço principal e transições

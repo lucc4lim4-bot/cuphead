@@ -19,7 +19,7 @@ class Player {
     this.dmgMul = this.charm === 'c_heart' ? 0.95 : 1;
     this.parryWin = this.charm === 'c_magnet' ? 0.36 : 0.22; this.parryR = this.charm === 'c_magnet' ? 34 : 16;
     this.bubble = this.charm === 'c_bubble'; this.bubbleT = 0; this.doubleUsed = false;
-    this.trail = []; this.recoil = 0; this.spin = 0;
+    this.trail = []; this.recoil = 0; this.spin = 0; this.turnT = 0; this.takeoff = 0;
   }
   get alive() { return this.hp > 0; }
   box() {
@@ -44,7 +44,7 @@ class Player {
     this.land = Math.max(0, this.land - dt * 5);
     this.inv = Math.max(0, this.inv - dt); this.dashCd -= dt; this.shootCd -= dt; this.exT -= dt; this.hurtT -= dt;
     if (this.parryT > 0) this.parryT -= dt;
-    this.recoil = Math.max(0, this.recoil - dt * 12);
+    this.recoil = Math.max(0, this.recoil - dt * 12); this.turnT = Math.max(0, this.turnT - dt * 9); this.takeoff = Math.max(0, this.takeoff - dt * 5);
     if (this.charm === 'c_coffee' && this.superT <= 0) this.meter = Math.min(5, this.meter + 0.07 * dt);
     if (this.charm === 'c_bubble' && !this.bubble) { this.bubbleT -= dt; if (this.bubbleT <= 0) { this.bubble = true; Snd.play('parry'); Particles.stars(this.x, this.y - 40, 6, '#9fd0f0'); } }
     // rastro do dash
@@ -67,7 +67,7 @@ class Player {
 
     const L = I.left, R = I.right, U = I.up, D = I.down, lock = I.lock;
     const ax = (R ? 1 : 0) - (L ? 1 : 0);
-    if (ax && this.dashT <= 0) this.facing = ax;
+    if (ax && this.dashT <= 0) { if (ax !== this.facing && this.onGround) this.turnT = 1; this.facing = ax; }
     this.duck = this.onGround && D && this.dashT <= 0 && !U;
 
     // ---- Mira em 8 direções ----
@@ -89,7 +89,7 @@ class Player {
 
     // ---- Pulo / rebote ----
     if (Pr.jump && this.dashT <= 0) {
-      if (this.onGround) { this.vy = -P.jumpV; this.onGround = false; this.jumpHeld = true; Snd.play('jump'); }
+      if (this.onGround) { this.vy = -P.jumpV; this.onGround = false; this.jumpHeld = true; this.takeoff = 1; Snd.play('jump'); Particles.puff(this.x, GY - 4, 2, 7); }
       else if (this.charm === 'c_spring' && !this.doubleUsed) {
         this.doubleUsed = true; this.vy = -560; this.jumpHeld = true; this.parryT = this.parryWin; this.parryUsed = true;
         Snd.play('jump'); Particles.puff(this.x, this.y, 3, 8);
@@ -231,6 +231,8 @@ class Player {
       facing: this.facing, aim: this.aim, run: this.onGround && Math.abs(this.vx) > 10, air: !this.onGround,
       duck: this.duck, t: this.anim, land: this.land, dash: this.dashT > 0, shooting: this.shooting || this.exT > 0,
       parry: this.parryT > 0, hurt: this.hurtT > 0, superT: this.superT, vx: this.vx, dance: (this.victory || this.ready) && this.onGround,
+      vy: this.vy, takeoff: this.takeoff, turn: this.turnT, low: this.hp === 1 && (this.maxHp || 3) > 1,
+      idle: this.onGround && Math.abs(this.vx) < 10 && this.dashT <= 0 && !this.duck && !this.shooting, pulse: Music.pulse(),
     });
     ctx.restore();
   }

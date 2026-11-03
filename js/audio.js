@@ -99,8 +99,17 @@ const Music = {
     this.song = SONGS[name] || null; this.step = 0;
     if (this.song) this.melody = this.compose(this.song);
     if (Snd.ac) this.nextTime = Snd.ac.currentTime + 0.1;
+    this.t0 = this.nextTime || 0;
   },
   stop() { this.song = null; },
+  // fase da batida (0..1) e pulso que decai a cada batida, para tudo dançar no ritmo
+  beat() {
+    const s = this.song;
+    if (!Snd.ac || !s || this.t0 === undefined) return ((performance.now() / 1000) * 2) % 1;
+    const b = (Snd.ac.currentTime - this.t0) * s.bpm / 60;
+    return ((b % 1) + 1) % 1;
+  },
+  pulse() { return Math.pow(1 - this.beat(), 3); },
   compose(s) {
     // melodia determinística baseada nos acordes
     let seed = s.seed;
@@ -121,7 +130,7 @@ const Music = {
   schedule() {
     if (!Snd.ac || !this.song) return;
     const s = this.song, eighth = 60 / s.bpm / 2;
-    if (this.nextTime < Snd.ac.currentTime - 0.2) this.nextTime = Snd.ac.currentTime + 0.05;
+    if (this.nextTime < Snd.ac.currentTime - 0.2) { this.nextTime = Snd.ac.currentTime + 0.05; this.t0 = this.nextTime - this.step * eighth; }
     while (this.nextTime < Snd.ac.currentTime + 0.12) {
       const i = this.step, bar = ((i / 8) | 0) % s.prog.length, pos = i % 8;
       const [root, q] = s.prog[bar]; const tones = CH[q];
