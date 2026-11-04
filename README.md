@@ -25,6 +25,17 @@ Em Vila Vinil, a Chama Eterna do Farol se apagou e seis brasas mágicas foram ro
 - **1 Jogador**: escolha Fósforo ou Candela.
 - **2 Jogadores** (cooperativo local): cada um controla um herói. Quem perder toda a vida vira fantasma; o parceiro **rebate o coração rosa** do fantasma para revivê-lo. Os chefões ficam mais resistentes.
 
+## Jogar online (cada um no seu aparelho)
+
+Dois iPads, celulares ou computadores jogam a mesma fase juntos, um com o Fósforo e o outro com a Candela, e o progresso fica salvo nos dois.
+
+1. Abra https://lucc4lim4-bot.github.io/cuphead/ nos dois aparelhos.
+2. No primeiro: **Jogar online → Criar sala**, escolha o herói e anote o código de 4 números.
+3. No segundo: **Jogar online → Entrar numa sala**, digite o código e toque em **Entrar**.
+4. Quem criou a sala escolhe a fase no mapa; o outro pode abrir a loja enquanto espera.
+
+Ao conectar, os saves se juntam (melhores notas, mais moedas e todos os itens comprados), e cada vitória conta nos dois aparelhos. A conexão é direta entre os aparelhos (WebRTC, via PeerJS); funciona melhor com os dois no mesmo Wi-Fi. Não funciona dentro do Artifact do claude.ai, só no site.
+
 ## Loja do Seu Lampião
 
 No mapa, o primeiro ponto é o **Empório do Seu Lampião**. Vença chefões para ganhar **moedas** (mais moedas na primeira vitória, com nota alta e em dificuldades maiores; chegar à fase 3 e perder dá 1 moeda de consolação) e compre itens. Cada herói equipa **1 arma** e **1 amuleto** (tecla C troca o herói na loja).
@@ -120,6 +131,7 @@ Se for a primeira vez, ative em **Settings → Pages → Build and deployment �
 - `js/bosses2.js`: chefões 4 a 6 (comportamento, arte e cenários)
 - `js/shop.js`: loja, moedas, itens e o lojista
 - `js/boss-fx.js`: efeitos de ambiente e risadas dos chefões
+- `js/net.js`: jogo online (salas, conexão, save em conjunto)
 - `js/options.js`: telas de opções e de troca de teclas
 - `js/scenes.js`: cenários, luta, título, seleção de personagem, história, mapa e resultados
 - `js/main.js`: laço principal e transições

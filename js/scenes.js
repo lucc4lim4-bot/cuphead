@@ -101,6 +101,7 @@ class Fight {
     this.menuSel = 0; this.paused = false; this.sub = null; this.landed = false;
     this.arenaR = this.def.arenaR || W;
     Particles.clear(); Music.play(this.def.song);
+    if (Net.role === 'host' && Net.connected) Net.send({ t: 'fight', idx, diff: opt().diff, chars: Game.mode.chars });
   }
   // alvo atual dos ataques do chefão (sempre um jogador vivo)
   get player() { return this.focus && this.focus.alive ? this.focus : (this.players.find((p) => p.alive) || this.players[0]); }
@@ -523,6 +524,7 @@ class Results {
   constructor(idx, stats, hp, diffId = 'normal') {
     this.idx = idx; this.stats = stats; this.hp = hp; this.t = 0; this.diffId = diffId; this.diff = DIFFS[diffId] || DIFFS.normal;
     this.res = computeGrade(stats, hp, idx, diffId);
+    if (Net.role === 'host' && Net.connected) Net.send({ t: 'results', idx, stats, hp, diff: diffId });
     const id = BOSSES[idx].id, old = Save.data.grades[id];
     const gd = Save.data.gradeDiff || (Save.data.gradeDiff = {});
     const better = !old || GRADE_ORDER.indexOf(this.res.grade) > GRADE_ORDER.indexOf(old)
@@ -575,16 +577,17 @@ class Results {
 
 // ---------- Cena: Tela título ----------
 class Title {
-  constructor() { this.t = 0; this.sel = 0; this.help = false; this.helpPage = 0; Music.play('title'); InputMode.coop = false; }
+  constructor() { this.t = 0; this.sel = 0; this.help = false; this.helpPage = 0; Music.play('title'); InputMode.coop = false; if (Net.connected) Net.leave(); if (Game.mode.online) Game.mode = { coop: false, chars: [Game.mode.chars[0]] }; }
   update(dt) {
     this.t += dt;
     if (this.sub) { this.sub.update(dt); return; }
+    if (NetUI.el && !NetUI.el.hidden) return;
     if (this.help) {
       if (pressed.left || pressed.right) { this.helpPage ^= 1; Snd.play('select'); }
       else if (pressed.jump || pressed.start || backPressed()) { this.help = false; Snd.play('select'); }
       return;
     }
-    const n = 4;
+    const n = 5;
     if (pressed.up) { this.sel = (this.sel + n - 1) % n; Snd.play('select'); }
     if (pressed.down) { this.sel = (this.sel + 1) % n; Snd.play('select'); }
     if (pressed.mute) Snd.toggleMute();
@@ -592,7 +595,8 @@ class Title {
       Snd.play('confirm');
       if (this.sel === 0) Game.go(new CharSelect(false));
       else if (this.sel === 1) Game.go(new CharSelect(true));
-      else if (this.sel === 2) { this.help = true; this.helpPage = 0; }
+      else if (this.sel === 2) NetUI.open();
+      else if (this.sel === 3) { this.help = true; this.helpPage = 0; }
       else this.sub = new Options(() => { this.sub = null; });
     }
   }
@@ -611,12 +615,12 @@ class Title {
     drawHero('fosforo', 210, 462, { dance: true, t: this.t, scale: 2.1 });
     drawHero('candela', 400, 462, { dance: true, t: this.t + 0.45, scale: 1.9, facing: -1 });
     // menu
-    const opts = ['1 Jogador', '2 Jogadores', 'Como jogar', 'Opções'];
-    ink(5); rrect(570, 230, 300, 240, 14, PAPER);
+    const opts = ['1 Jogador', '2 no mesmo aparelho', 'Jogar online', 'Como jogar', 'Opções'];
+    ink(5); rrect(570, 222, 300, 268, 14, PAPER);
     opts.forEach((o, i) => {
       const sel = i === this.sel;
       ctx.font = `${sel ? 29 : 24}px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.fillStyle = sel ? '#c8352b' : 'rgba(26,20,16,.65)';
-      ctx.fillText((sel ? '► ' : '') + o, 720, 275 + i * 52);
+      ctx.fillText((sel ? '► ' : '') + o, 720, 262 + i * 50);
     });
     ctx.font = `15px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('↑/↓ escolher · Z ou Enter confirmar', 720, 498);
     if (this.help) this.drawHelp();
@@ -746,16 +750,26 @@ class MapScene {
   constructor(bossIdx = 0) {
     this.sel = clamp(bossIdx + 1, 0, BOSSES.length + 1); this.t = 0;
     this.px = NODES[this.sel].x; this.py = NODES[this.sel].y; Music.play('map');
+    if (Net.role === 'host' && Net.connected) Net.send({ t: 'map', sel: this.sel });
   }
   allDone() { return BOSSES.every((b) => Save.data.grades[b.id]); }
   update(dt) {
     this.t += dt;
     const max = this.allDone() ? BOSSES.length + 1 : BOSSES.length;
+    if (Net.role === 'guest' && Net.connected) {
+      // convidado: quem escolhe a fase é o anfitrião; daqui dá para abrir a loja
+      const n = NODES[this.sel]; this.px = lerp(this.px, n.x, dt * 8); this.py = lerp(this.py, n.y, dt * 8);
+      if (pressed.jump || pressed.start) { Snd.play('confirm'); Game.go(new Shop()); }
+      if (backPressed()) { Net.leave(); Game.go(new Title()); }
+      return;
+    }
+    const prevSel = this.sel;
     if (pressed.right || pressed.down) { if (this.sel < max) { this.sel++; Snd.play('select'); } }
     if (pressed.left || pressed.up) { if (this.sel > 0) { this.sel--; Snd.play('select'); } }
     const n = NODES[this.sel]; this.px = lerp(this.px, n.x, dt * 8); this.py = lerp(this.py, n.y, dt * 8);
+    if (this.sel !== prevSel && Net.role === 'host' && Net.connected) Net.send({ t: 'mapsel', sel: this.sel });
     if (backPressed()) { Game.go(new Title()); return; }
-    InputMode.coop = Game.mode.coop;
+    InputMode.coop = Game.mode.coop && !Game.mode.online;
     if (pressed.jump || pressed.start) {
       Snd.play('confirm');
       if (this.sel === 0) Game.go(new Shop());
@@ -808,7 +822,8 @@ class MapScene {
         : (done ? 'O Farol — leve as brasas para casa!' : `O Farol (derrote os ${N} chefões)`);
     outlinedText('Vila Vinil', 110, 45, 30, '#ffd84a');
     ctx.font = `19px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(info, 220, 45);
-    ctx.font = `13px ${FONT_TEXT}`; ctx.textAlign = 'right'; ctx.fillText('←/→ andar · Z entrar · Esc título', 925, 66);
+    ctx.font = `13px ${FONT_TEXT}`; ctx.textAlign = 'right';
+    ctx.fillText(Net.role === 'guest' && Net.connected ? 'Online: o outro aparelho escolhe a fase · Z abre a loja' : Net.connected ? 'Online · ←/→ andar · Z entrar' : '←/→ andar · Z entrar · Esc título', 925, 66);
     // contadores
     const brasas = BOSSES.filter((b) => Save.data.grades[b.id]).length, D = curDiff();
     const chip = (x, w, draw) => { ink(4); rrect(x, 86, w, 34, 9, PAPER); draw(x); };

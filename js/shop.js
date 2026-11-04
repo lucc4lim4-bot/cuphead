@@ -176,7 +176,7 @@ function speechBubble(x, y, w, text, tail = 'left') {
 class Shop {
   constructor() {
     this.t = 0; this.sel = 0; this.talk = 0; this.happy = 0; this.shake = 0;
-    this.hero = Game.mode.chars[0] || 'fosforo';
+    this.hero = Net.role === 'guest' ? Net.myHero : (Game.mode.chars[0] || 'fosforo');
     this.line = 'Bem-vindo ao Empório! Moedas brilhando? Então vamos negociar!';
     Music.play('shop');
   }
@@ -191,7 +191,7 @@ class Shop {
     if (pressed.down && row < 2) { this.sel += 3; moved = true; }
     if (moved) { Snd.play('select'); const it = ITEMS[this.sel]; this.say(it.desc); }
     if (pressed.dash || pressed.ex) { this.hero = this.hero === 'fosforo' ? 'candela' : 'fosforo'; Snd.play('select'); this.say(`Equipando ${HEROES[this.hero].name} agora. Cada herói tem sua própria arma e amuleto!`); }
-    if (backPressed()) { Snd.play('confirm'); Game.go(new MapScene(-1)); return; }
+    if (backPressed()) { Snd.play('confirm'); if (Net.connected && Net.role === 'guest') Net.send({ t: 'loadout', loadout: loadoutOf(Net.myHero) }); Game.go(new MapScene(-1)); return; }
     if (pressed.jump || pressed.start || pressed.shoot) this.choose(ITEMS[this.sel]);
   }
   choose(it) {
