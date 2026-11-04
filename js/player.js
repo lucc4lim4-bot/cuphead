@@ -14,7 +14,7 @@ class Player {
     this.shooting = false; this.hurtT = 0;
     this.ghost = false; this.ghostT = 0; this.gone = false;
     // equipamento comprado na loja
-    const lo = (typeof loadoutOf === 'function') ? loadoutOf(type) : { weapon: null, charm: null };
+    const lo = (idx === 1 && typeof Net !== 'undefined' && Net.role === 'host') ? Net.remoteLoadout : (typeof loadoutOf === 'function') ? loadoutOf(type) : { weapon: null, charm: null };
     this.weapon = lo.weapon; this.charm = lo.charm;
     this.dmgMul = this.charm === 'c_heart' ? 0.95 : 1;
     this.parryWin = this.charm === 'c_magnet' ? 0.36 : 0.22; this.parryR = this.charm === 'c_magnet' ? 34 : 16;

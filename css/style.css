@@ -151,3 +151,18 @@ body.touch.dir-float #touch button[data-k="up"], body.touch.dir-float #touch but
 body.touch.dir-float #touch button[data-k="left"], body.touch.dir-float #touch button[data-k="right"] { display: none; }
 #touch button[data-k] { z-index: 3; }
 body.editing #stick { outline: 3px dashed #ffd84a; outline-offset: 3px; cursor: grab; }
+
+/* ---------- Painel de jogo online ---------- */
+#netpanel { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(15, 8, 4, .62); z-index: 10; padding: 12px; }
+#netpanel[hidden] { display: none; }
+#netpanel .np-card { position: relative; width: min(460px, 100%); max-height: 100%; overflow: auto; background: var(--paper); color: var(--ink); border: 5px solid var(--ink); border-radius: 16px; padding: 18px 22px; box-shadow: 0 10px 0 rgba(0,0,0,.4); font: 16px "Special Elite", monospace; text-align: center; }
+#netpanel h2 { margin: 0 0 8px; font: 30px "Rye", Georgia, serif; color: #c8352b; }
+#netpanel p { margin: 8px 0; line-height: 1.35; }
+#netpanel .np-row { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin-top: 12px; }
+#netpanel button { font: 17px "Special Elite", monospace; padding: 10px 16px; border: 3px solid var(--ink); border-radius: 10px; background: #fff6e0; color: var(--ink); cursor: pointer; min-height: 48px; }
+#netpanel button.primary { background: #c8352b; color: #fff6e0; }
+#netpanel button:focus-visible { outline: 3px solid #ffd84a; outline-offset: 2px; }
+#netpanel .np-x { position: absolute; top: 8px; right: 8px; min-height: 0; padding: 4px 10px; font-size: 16px; }
+#netpanel .np-code { font: 54px "Rye", Georgia, serif; letter-spacing: 10px; color: var(--ink); margin: 4px 0; }
+#netpanel input { font: 34px "Rye", Georgia, serif; width: 6ch; text-align: center; letter-spacing: 6px; padding: 6px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; color: var(--ink); }
+#netpanel .np-status { color: #8a3a10; font-weight: 700; }

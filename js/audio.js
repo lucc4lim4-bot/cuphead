@@ -47,6 +47,7 @@ const Snd = {
     s.connect(f); f.connect(g); g.connect(bus || this.sfxBus); s.start(t); s.stop(t + dur + 0.02);
   },
   play(name) {
+    if (typeof Net !== 'undefined' && Net.role === 'host' && Net.connected && Net.sfx.length < 24) Net.sfx.push(name);
     if (!this.ac) return;
     switch (name) {
       case 'shoot': this.tone(rand(700, 820), 0.05, 'square', 0.035, -300); break;
