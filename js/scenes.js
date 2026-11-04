@@ -81,27 +81,30 @@ function buildBackgrounds() {
 }
 
 // ---------- Cena: Luta ----------
+// Projéteis que podem virar "rosa" (os outros, como raios e vapor, nunca são rebatíveis)
+const PINK_KINDS = new Set(['note', 'record', 'drop', 'cloudlet', 'hail', 'gear', 'tick', 'egg', 'card', 'rabbit', 'dove', 'coal', 'ring', 'plane', 'key', 'wstar']);
+const PINK_MIN_GAP = 3.5, PINK_MAX_GAP = 12.5;   // segundos entre rosas: no mínimo 3,5 s; no máximo 12,5 s
 class Fight {
-  constructor(idx) {
-    this.idx = idx; this.def = BOSSES[idx];
+  constructor(idx, defOverride) {
+    this.idx = idx; this.def = defOverride || BOSSES[idx];
     const mode = Game.mode;
     this.coop = mode.coop;
     this.boss = this.def.make();
-    this.diffId = opt().diff; this.diff = curDiff();
+    this.diffId = curDiffId(); this.diff = curDiff();
     this.boss.hp = this.boss.max = Math.round(this.boss.max * this.diff.hp * (this.coop ? 1.7 : 1));
     this.players = mode.coop
       ? [new Player(0, mode.chars[0], 120), new Player(1, mode.chars[1], 210)]
       : [new Player(0, mode.chars[0], 160)];
     for (const p of this.players) { p.hp = this.diff.lives + (p.charm === 'c_heart' ? 1 : 0); p.maxHp = p.hp; }
-    this.lastPhase = 1; this.banner = null; this.consolation = false;
+    this.lastPhase = 1; this.banner = null; this.pg = { last: 0 };
     this.focus = this.players[0];
     this.pb = []; this.eb = []; this.wind = 0;
     this.state = 'intro'; this.stateT = 0; this.shake = 0; this.hitstop = 0; this.t = 0;
-    this.stats = { time: 0, parries: 0, meterUsed: 0 };
+    this.stats = { time: 0, parries: 0, meterUsed: 0, pinkSeen: 0 };
     this.menuSel = 0; this.paused = false; this.sub = null; this.landed = false;
     this.arenaR = this.def.arenaR || W;
     Particles.clear(); Music.play(this.def.song);
-    if (Net.role === 'host' && Net.connected) Net.send({ t: 'fight', idx, diff: opt().diff, chars: Game.mode.chars });
+    if (Net.role === 'host' && Net.connected) Net.send({ t: 'fight', idx, diff: curDiffId(), chars: Game.mode.chars });
   }
   // alvo atual dos ataques do chefão (sempre um jogador vivo)
   get player() { return this.focus && this.focus.alive ? this.focus : (this.players.find((p) => p.alive) || this.players[0]); }
@@ -135,13 +138,27 @@ class Fight {
     boss.update(dt, this);
     if (boss.idleFx && !boss.dead) boss.idleFx(dt, this);
     if (this.banner) this.banner.t -= dt;
-    if (boss.phase !== this.lastPhase && !boss.dead) {
+    if (boss.phase !== this.lastPhase && !boss.dead && !boss.mini) {
       this.lastPhase = boss.phase; boss.phaseT = 1.0; this.banner = { text: `FASE ${boss.phase}!`, t: 1.4 };
       const c = boss.hurtCircles()[0]; if (c) { Particles.stars(c.x, c.y, 16, '#ffd84a'); Particles.puff(c.x, c.y, 8, 22); }
       this.hitstop = Math.max(this.hitstop, 0.15);
     }
 
-    // tiros dos jogadores
+    this.stepPlayerShots(dt);
+
+    this.stepEnemyShots(dt);
+    if (this.state === 'play') this.stepContacts();
+
+    if (this.state === 'play' && !this.players.some((p) => p.alive)) {
+      this.state = 'dead'; this.stateT = 0; this.menuSel = 0; Snd.play('lose'); Music.stop();
+      this.recordProgress();
+    }
+    if (this.state === 'win') {
+      if (Math.random() < 0.25) { const c = boss.hurtCircles()[0] || { x: boss.x || W * 0.75, y: boss.y || 250 }; Particles.stars(c.x + rand(-80, 80), c.y + rand(-80, 80), 6, pick(['#ffd84a', '#ff9a2e', '#fff'])); if (Math.random() < 0.3) Snd.play('boom'); this.shake = 5; }
+      if (this.stateT > 3.6) this.finish();
+    }
+  }
+  stepPlayerShots(dt) {
     for (const b of this.pb) {
       b.life -= dt;
       if (b.homing && b.t2 === undefined) b.t2 = 0;
@@ -158,13 +175,14 @@ class Fight {
       if (b.grav) b.vy += b.grav * dt;
       b.x += b.vx * dt; b.y += b.vy * dt;
       if (b.kind === 'bomb' && b.y > GY - 10 && b.life > 0) { this.explode(b); b.life = 0; }
-      if (b.x < -40 || b.x > W + 40 || b.y < -40 || b.y > H + 40) b.life = 0;
+      const cx = this.camX || 0;
+      if (b.x < cx - 40 || b.x > cx + W + 40 || b.y < -40 || b.y > H + 40) b.life = 0;
       if (b.life <= 0 || this.state !== 'play') continue;
       for (const tg of this.targets()) {
         const hit = tg.hurtCircles().some((c) => (c.x - b.x) ** 2 + (c.y - b.y) ** 2 < (c.r + b.r) ** 2);
         if (hit) {
           tg.damage(b.dmg, this); b.life = 0; if (b.kind === 'bomb') this.explode(b, tg);
-          const o = b.from; if (o && o.superT <= 0 && b.kind !== 'ember') o.meter = Math.min(5, o.meter + 0.012 * b.dmg);
+          const o = b.from; if (o && o.superT <= 0 && b.kind !== 'ember') o.meter = Math.min(5, o.meter + 0.02 * b.dmg);
           if (b.kind === 'ember') { Particles.stars(b.x, b.y, 10, HEROES[b.hero].flame[1]); Snd.play('boom'); this.shake = 6; } else { Particles.stars(b.x, b.y, 1, b.kind === 'wax' ? '#bfe3ff' : '#ffd84a'); Snd.play('hit'); }
           break;
         }
@@ -172,10 +190,11 @@ class Fight {
       if (b.kind === 'ember' && Math.random() < 0.6) Particles.puff(b.x, b.y, 1, 8, HEROES[b.hero].flame[1]);
     }
     this.pb = this.pb.filter((b) => b.life > 0);
-
-    // projéteis inimigos
+  }
+  stepEnemyShots(dt) {
     for (const b of this.eb) {
       updateBullet(b, dt * this.diff.speed, this);
+      if (!b.pc) this.gatePink(b);
       if (b.life <= 0 || this.state !== 'play') continue;
       for (const p of this.players) {
         if (!p.alive || b.life <= 0) continue;
@@ -185,31 +204,30 @@ class Fight {
       }
     }
     this.eb = this.eb.filter((b) => b.life > 0);
-    if (this.state === 'play') for (const p of this.players) {
+  }
+  stepContacts() {
+    for (const p of this.players) {
       if (!p.alive) continue;
       const box = p.box();
       // contato com o chefão
-      for (const c of boss.dangerCircles()) if (circRect(c.x, c.y, c.r, box.x, box.y, box.w, box.h)) p.hurt(this);
+      for (const c of this.dangerList()) if (circRect(c.x, c.y, c.r, box.x, box.y, box.w, box.h)) p.hurt(this);
       // reviver o parceiro: rebater o coração rosa do fantasma
       for (const g of this.players) if (g.ghost && !g.gone && p.parryT > 0) {
         const h = g.heartPos();
         if (circRect(h.x, h.y, 14 + p.parryR, box.x, box.y - 10, box.w, box.h + 10)) {
-          g.revive(); p.vy = -560; p.parryT = 0; p.parryUsed = false; p.jumpHeld = false;
+          g.revive(); p.parryT = 0; if (!p.dashParry) { p.vy = -560; p.parryUsed = false; p.jumpHeld = false; }
           this.hitstop = 0.12; Snd.play('revive'); Particles.stars(h.x, h.y, 12, PINK);
           Particles.add({ kind: 'text', text: 'REVIVEU!', x: h.x, y: h.y - 20, vy: -40, life: 1.2, size: 28, color: PINK });
         }
       }
     }
-
-    if (this.state === 'play' && !this.players.some((p) => p.alive)) {
-      this.state = 'dead'; this.stateT = 0; this.menuSel = 0; Snd.play('lose'); Music.stop();
-      if (boss.phase === 3) { this.consolation = true; addCoins(1); }
-    }
-    if (this.state === 'win') {
-      if (Math.random() < 0.25) { const c = boss.hurtCircles()[0] || { x: boss.x || W * 0.75, y: boss.y || 250 }; Particles.stars(c.x + rand(-80, 80), c.y + rand(-80, 80), 6, pick(['#ffd84a', '#ff9a2e', '#fff'])); if (Math.random() < 0.3) Snd.play('boom'); this.shake = 5; }
-      if (this.stateT > 3.6) Game.go(new Results(this.idx, this.stats, Math.max(...this.players.map((p) => p.hp)), this.diffId));
-    }
   }
+  dangerList() { return this.boss.dangerCircles(); }
+  // pontos de saída (as fases Run 'n' Gun reaproveitam a luta e trocam estes comportamentos)
+  restart() { Game.go(new Fight(this.idx)); }
+  exitToMap() { Game.go(MapScene.boss(this.idx)); }
+  finish() { Game.go(new Results(this.idx, this.stats, Math.max(...this.players.map((p) => p.hp)), this.diffId)); }
+  drawBackdrop() { ctx.drawImage(BG[this.def.bg], -20, -20, W + 40, H + 40); }
   explode(b, hitTarget) {
     Particles.stars(b.x, b.y, 12, '#ffb347'); Particles.puff(b.x, b.y, 5, 16, '#e8d8b8'); Snd.play('boom'); this.shake = Math.max(this.shake, 5);
     for (const tg of this.targets()) {
@@ -217,11 +235,37 @@ class Fight {
       if (tg.hurtCircles().some((c) => (c.x - b.x) ** 2 + (c.y - b.y) ** 2 < (c.r + 70) ** 2)) tg.damage(b.dmg * 0.5, this);
     }
   }
+  // ---- saco de rosas: o design de cada ataque só diz QUAIS projéteis podem ser rosa;
+  //      quem decide quando é um sorteio com intervalo mínimo e garantia de aparecer ----
+  gatePink(b) {
+    const cx = this.camX || 0;
+    if (b.x < cx + 24 || b.x > cx + W - 24 || b.y < 40 || b.y > GY + 6) return; // só decide quando está à vista
+    b.pc = 1;
+    if (!PINK_KINDS.has(b.kind)) { b.pink = false; return; }
+    const since = this.stats.time - this.pg.last;
+    let yes = false;
+    if (since >= PINK_MIN_GAP) {
+      const need = clamp((since - PINK_MIN_GAP) / 9, 0, 1);
+      yes = since >= PINK_MAX_GAP || Math.random() < 0.05 + 0.5 * need * need;
+    }
+    b.pink = yes;
+    if (yes) { this.pg.last = this.stats.time; this.stats.pinkSeen++; }
+  }
   parry(p, b) {
     b.life = 0;
-    p.vy = -560; p.parryT = 0; p.parryUsed = false; p.jumpHeld = false;
+    if (p.dashParry) { p.parryT = 0; p.dashCd = 0; p.airDashUsed = false; }       // Candela: o dash continua livre
+    else { p.vy = -560; p.parryT = 0; p.parryUsed = false; p.jumpHeld = false; }  // Fósforo: quica no rosa
+    p.inv = Math.max(p.inv, 0.7);                                                  // recompensa: instante de invulnerabilidade
     p.meter = Math.min(5, p.meter + 1); this.stats.parries++;
     this.hitstop = 0.1; Snd.play('parry'); Particles.stars(b.x, b.y, 8, PINK);
+    Particles.add({ kind: 'text', text: '+1', x: b.x, y: b.y - 14, vy: -50, life: 0.7, size: 22, color: PINK });
+  }
+  recordProgress() {
+    // guarda o melhor avanço no boss (sem moeda de consolação: o progresso aparece no cartão)
+    const id = this.def.id, pct = Math.round((1 - this.boss.hp / this.boss.max) * 100);
+    const best = Save.data.best || (Save.data.best = {});
+    this.prevBest = best[id] || 0;
+    if (pct > this.prevBest) { best[id] = pct; Save.write(); }
   }
   updatePause() {
     const opts = 4;
@@ -231,21 +275,21 @@ class Fight {
     if (pressed.jump || pressed.start) {
       Snd.play('confirm');
       if (this.menuSel === 0) this.paused = false;
-      else if (this.menuSel === 1) Game.go(new Fight(this.idx));
+      else if (this.menuSel === 1) this.restart();
       else if (this.menuSel === 2) this.sub = new Options(() => { this.sub = null; });
-      else Game.go(new MapScene(this.idx));
+      else this.exitToMap();
     }
   }
   updateDeath() {
     if (this.stateT < 1.2) return;
     if (pressed.up || pressed.down) { this.menuSel ^= 1; Snd.play('select'); }
-    if (pressed.jump || pressed.start) { Snd.play('confirm'); Game.go(this.menuSel === 0 ? new Fight(this.idx) : new MapScene(this.idx)); }
+    if (pressed.jump || pressed.start) { Snd.play('confirm'); if (this.menuSel === 0) this.restart(); else this.exitToMap(); }
   }
   draw() {
     ctx.save();
     const sk = opt().shake ? this.shake : 0;
     if (sk > 0) ctx.translate(rand(-1, 1) * sk, rand(-1, 1) * sk);
-    ctx.drawImage(BG[this.def.bg], -20, -20, W + 40, H + 40);
+    this.drawBackdrop();
     // entrada do chefão (cai do alto) e saída ao ser derrotado (afunda girando)
     ctx.save();
     if (this.state === 'intro' && this.stateT < 0.75) { const k = this.stateT / 0.75; ctx.translate(0, -(1 - k * k) * 520); }
@@ -297,7 +341,7 @@ class Fight {
   drawHUD() {
     this.players.forEach((p, i) => {
       const hearts = Math.max(p.maxHp || 3, p.hp);
-      const cardW = 14 + hearts * 17, wTot = 44 + cardW + 10 + 5 * 21 + 8 + 2 * 26;
+      const cardW = 14 + hearts * 17, wTot = 44 + cardW + 10 + 5 * 21 + 8 + 3 * 26;
       const right = i === 1, x0 = right ? W - 14 - wTot : 14, y0 = Touch.visible() ? 16 : H - 54;
       ctx.save(); ctx.translate(x0, y0);
       // painel de fundo
@@ -335,9 +379,11 @@ class Fight {
       if (p.meter >= 5 && p.alive) { ctx.font = `11px ${FONT_TITLE}`; ctx.fillStyle = '#ffd84a'; ctx.textAlign = 'center'; ctx.lineWidth = 3; ctx.strokeStyle = INK; ctx.strokeText('SUPER!', mx + 51, -2); ctx.fillText('SUPER!', mx + 51, -2); }
       // itens equipados
       const ix = mx + 5 * 21 + 8;
-      [p.weapon, p.charm].forEach((id, k) => {
-        const cx = ix + 12 + k * 26;
-        ink(2.5); circle(cx, 19, 12, id ? '#fff6e0' : 'rgba(255,246,224,.25)');
+      [p.weapons[0], p.weapons[1], p.charm].forEach((id, k) => {
+        const cx = ix + 12 + k * 26, isW = k < 2, active = isW && p.wi === k;
+        ink(active ? 3.5 : 2.5); circle(cx, 19, active ? 13 : 11, id ? '#fff6e0' : 'rgba(255,246,224,.25)');
+        if (isW && !id) drawItemIcon('spark', cx, 20, 0.36, this.t);
+        if (isW && !active) { ctx.fillStyle = 'rgba(26,20,16,.35)'; ctx.beginPath(); ctx.arc(cx, 19, 11, 0, TAU); ctx.fill(); }
         if (id) drawItemIcon(id, cx, 20, 0.36, this.t);
         if (id === 'c_bubble' && !p.bubble) { ctx.fillStyle = 'rgba(26,20,16,.5)'; ctx.beginPath(); ctx.moveTo(cx, 19); ctx.arc(cx, 19, 12, -Math.PI / 2, -Math.PI / 2 + TAU * (p.bubbleT / 25)); ctx.fill(); }
       });
@@ -345,7 +391,7 @@ class Fight {
       ctx.restore();
     });
     // barra de vida do chefão
-    if (opt().bossBar && this.state !== 'intro') {
+    if (opt().bossBar && this.state !== 'intro' && this.showBossBar !== false) {
       const b = this.boss, k = clamp(b.hp / b.max, 0, 1);
       this.barLag = this.barLag === undefined ? k : Math.max(k, this.barLag - 0.004);
       const bw = 340, bx = W / 2 - bw / 2, by = Touch.visible() ? 64 : 14;
@@ -400,7 +446,7 @@ class Fight {
     star(bx + bw, by, 16, '#ffd84a');
     ctx.save(); ctx.translate(bx + bw * prog * Math.min(1, (t - 0.5) * 1.5), by - 12); drawHero(this.players[0].type, 0, 22, { scale: 0.45, t: this.t }); ctx.restore();
     ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(`Progresso: ${Math.round(prog * 100)}%  ·  ${this.diff.name}`, 0, 30);
-    if (this.consolation) { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = '#8a6a10'; ctx.fillText('Chegou à fase 3: +1 moeda de consolação!', 0, 50); }
+    ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = '#6a5a4a'; ctx.fillText(`Fase ${this.boss.phase} de 3  ·  melhor avanço: ${Math.max(this.prevBest || 0, Math.round(prog * 100))}%`, 0, 52);
     const opts = ['Tentar de novo', 'Voltar ao mapa'];
     opts.forEach((o, i) => {
       const sel = i === this.menuSel;
@@ -460,14 +506,13 @@ class CharSelect {
   update(dt) {
     this.t += dt;
     if (pressed.left || pressed.right) { this.sel ^= 1; Snd.play('select'); }
-    if (pressed.up || pressed.down) { cycleDiff(pressed.up ? -1 : 1); Snd.play('select'); }
     if (backPressed()) { InputMode.coop = Game.mode.coop; Game.go(new Title()); return; }
     if (pressed.jump || pressed.start || pressed.shoot) {
       Snd.play('confirm');
       const ids = ['fosforo', 'candela'];
       Game.mode = { coop: this.coop, chars: this.coop ? [ids[this.sel], ids[this.sel ^ 1]] : [ids[this.sel]] };
       InputMode.coop = this.coop;
-      Game.go(Save.data.seenIntro ? new MapScene(0) : new Story(STORY_INTRO, () => { Save.data.seenIntro = true; Save.write(); Game.go(new MapScene(0)); }));
+      Game.go(Save.data.seenIntro ? MapScene.boss(0) : new Story(STORY_INTRO, () => { Save.data.seenIntro = true; Save.write(); Game.go(MapScene.boss(0)); }));
     }
   }
   draw() {
@@ -494,24 +539,28 @@ class CharSelect {
       ctx.restore();
     });
     ctx.font = `18px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center';
-    // dificuldade
+    // dificuldade (travada no save)
     const D = curDiff();
     ink(4); rrect(W / 2 - 250, 494, 500, 34, 10, '#fff6e0');
     ctx.font = `20px ${FONT_TITLE}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillStyle = D.color;
-    ctx.fillText(`▲  Dificuldade: ${D.name}  ▼`, W / 2, 504);
-    ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(D.desc, W / 2, 520);
+    ctx.fillText(`Dificuldade: ${D.name}`, W / 2, 504);
+    ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.fillText(`${D.desc} · travada neste save`, W / 2, 520);
     ctx.font = `13px ${FONT_TEXT}`; ctx.fillStyle = INK;
-    ctx.fillText(this.coop ? '←/→ trocar heróis · ↑/↓ dificuldade · Z/F/Enter confirmar · Esc voltar' : '←/→ herói · ↑/↓ dificuldade · Z/Enter confirmar · Esc voltar', W / 2, 536);
+    ctx.fillText(this.coop ? '←/→ trocar heróis · Z/F/Enter confirmar · Esc voltar' : '←/→ herói · Z/Enter confirmar · Esc voltar', W / 2, 536);
   }
 }
 
 // ---------- Cena: Resultado ----------
+// rosas: quantos o jogador devia rebater (metade dos que apareceram, entre 1 e 4)
+const pinkNeeded = (stats) => clamp(Math.round((stats.pinkSeen || 0) * 0.5), 1, 4);
 function computeGrade(stats, hp, idx, diffId = 'normal') {
-  const par = BOSSES[idx].par || 120, D = DIFFS[diffId] || DIFFS.normal;
+  const D = DIFFS[diffId] || DIFFS.normal;
+  // tempo de referência cresce com o HP do boss (lutas mais longas) e com a dificuldade
+  const par = (BOSSES[idx].par || 120) * 1.5 * (D.hp / DIFFS.normal.hp);
   let s = 0;
   s += stats.time <= par * 0.65 ? 30 : stats.time <= par ? 22 : stats.time <= par * 1.5 ? 12 : 5;
   s += 30 * Math.min(1, hp / D.lives);
-  s += Math.min(stats.parries, 3) * 7;
+  s += stats.pinkSeen ? 21 * Math.min(1, stats.parries / pinkNeeded(stats)) : 21;
   s += Math.min(stats.meterUsed, 6) * 3.2;
   const table = [[96, 'S'], [88, 'A+'], [80, 'A'], [74, 'A-'], [68, 'B+'], [60, 'B'], [54, 'B-'], [48, 'C+'], [40, 'C'], [0, 'D']];
   let grade = table.find(([m]) => s >= m)[1];
@@ -533,6 +582,7 @@ class Results {
     this.firstClear = !old;
     this.coins = coinsForWin(this.res.grade, diffId, this.firstClear); addCoins(this.coins);
     if (better) { Save.data.grades[id] = this.res.grade; gd[id] = diffId; Save.write(); }
+    this.shopNews = this.firstClear && shopRotateOldest();   // 1ª vitória renova a vitrine da loja
     Music.play('map');
   }
   update(dt) {
@@ -540,7 +590,7 @@ class Results {
     if (this.t > 1 && (pressed.jump || pressed.start)) {
       Snd.play('confirm');
       const allDone = BOSSES.every((b) => Save.data.grades[b.id]);
-      Game.go(new MapScene(allDone ? BOSSES.length : Math.min(this.idx + 1, BOSSES.length - 1)));
+      Game.go(allDone ? MapScene.light() : MapScene.boss(Math.min(this.idx + 1, BOSSES.length - 1)));
     }
   }
   draw() {
@@ -550,7 +600,7 @@ class Results {
     ctx.font = `20px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText(`${BOSSES[this.idx].name} foi derrotado e a brasa foi recuperada!`, W / 2, 145);
     ctx.font = `17px ${FONT_TITLE}`; ctx.fillStyle = this.diff.color; ctx.fillText(`Dificuldade: ${this.diff.name}`, 690, 182);
     const mm = Math.floor(this.stats.time / 60), ss = Math.floor(this.stats.time % 60).toString().padStart(2, '0');
-    const rows = [['Tempo', `${mm}:${ss}`], ['Vida restante', `${this.hp} / ${this.diff.lives}`], ['Rebotes', `${Math.min(this.stats.parries, 3)} / 3`], ['Chamas gastas', `${Math.min(this.stats.meterUsed, 6)} / 6`]];
+    const rows = [['Tempo', `${mm}:${ss}`], ['Vida restante', `${this.hp} / ${this.diff.lives}`], ['Rebotes', `${Math.min(this.stats.parries, pinkNeeded(this.stats))} / ${pinkNeeded(this.stats)}`], ['Chamas gastas', `${Math.min(this.stats.meterUsed, 6)} / 6`]];
     rows.forEach(([k, v], i) => {
       const show = this.t > 0.3 + i * 0.3;
       if (!show) return;
@@ -568,7 +618,7 @@ class Results {
       if (this.newBest) { ctx.fillStyle = '#c8352b'; ctx.fillText('★ novo recorde! ★', 690, 400); }
       ink(4); rrect(590, 414, 200, 40, 10, '#fff6e0'); drawCoin(616, 434, 12, this.t);
       ctx.font = `18px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(`+${this.coins}  (total ${Save.data.coins})`, 636, 435);
-      if (this.firstClear) { ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = '#2f8a4a'; ctx.textAlign = 'center'; ctx.fillText('bônus de primeira vitória!', 690, 464); }
+      if (this.firstClear) { ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = '#2f8a4a'; ctx.textAlign = 'center'; ctx.fillText('bônus de primeira vitória!' + (this.shopNews ? ' · a loja tem novidades' : ''), 690, 464); }
     }
     Game.mode.chars.forEach((c, i) => drawHero(c, 280 + i * 70, 450, { dance: true, t: this.t + i * 0.4, scale: 0.9, facing: i ? -1 : 1 }));
     if (this.t > 1 && Math.floor(this.t * 2) % 2) { ctx.font = `20px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('Pressione Z para continuar', W / 2, 465); }
@@ -577,7 +627,7 @@ class Results {
 
 // ---------- Cena: Tela título ----------
 class Title {
-  constructor() { this.t = 0; this.sel = 0; this.help = false; this.helpPage = 0; Music.play('title'); InputMode.coop = false; if (Net.connected) Net.leave(); if (Game.mode.online) Game.mode = { coop: false, chars: [Game.mode.chars[0]] }; }
+  constructor() { this.t = 0; this.sel = 0; this.help = false; this.helpPage = 0; Music.play('title'); InputMode.coop = false; if (Net.connected) Net.leave(); Game.diffOverride = null; if (Game.mode.online) Game.mode = { coop: false, chars: [Game.mode.chars[0]] }; }
   update(dt) {
     this.t += dt;
     if (this.sub) { this.sub.update(dt); return; }
@@ -597,7 +647,7 @@ class Title {
       else if (this.sel === 1) Game.go(new CharSelect(true));
       else if (this.sel === 2) NetUI.open();
       else if (this.sel === 3) { this.help = true; this.helpPage = 0; }
-      else this.sub = new Options(() => { this.sub = null; });
+      else this.sub = new Options(() => { this.sub = null; }, true);
     }
   }
   draw() {
@@ -623,6 +673,11 @@ class Title {
       ctx.fillText((sel ? '► ' : '') + o, 720, 262 + i * 50);
     });
     ctx.font = `15px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText('↑/↓ escolher · Z ou Enter confirmar', 720, 498);
+    // save ativo
+    ink(3); rrect(18, 500, 232, 28, 9, '#fff6e0');
+    ctx.font = `15px ${FONT_TITLE}`; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillStyle = INK; ctx.fillText(`Save ${Save.slot}`, 30, 514);
+    ctx.fillStyle = curDiff().color; ctx.fillText(curDiff().name, 108, 514);
+    ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.7)'; ctx.fillText('trocar: Opções', 178, 514);
     if (this.help) this.drawHelp();
     if (this.sub) this.sub.draw();
   }
@@ -633,30 +688,32 @@ class Title {
     const bl = (pr, a, n = 2) => getBinds(pr)[a].slice(0, n).map(keyName).join(' / ') || '—';
     const solo = [
       [bl('solo', 'left', 1) + ' ' + bl('solo', 'right', 1) + ' ' + bl('solo', 'up', 1) + ' ' + bl('solo', 'down', 1), 'Andar, mirar (cima, diagonais) e agachar'],
-      [bl('solo', 'jump'), 'Pular (segure para ir mais alto)'],
-      [bl('solo', 'jump', 1) + ' no ar', 'REBOTE: toque em objetos ROSA para quicar e ganhar 1 chama'],
-      [bl('solo', 'shoot'), 'Atirar (segure)'],
-      [bl('solo', 'dash'), 'Dash rápido (também no ar)'],
+      [bl('solo', 'jump'), 'Pular (segure para ir mais alto). Candela pula duas vezes'],
+      [bl('solo', 'jump', 1) + ' no ar', 'FÓSFORO rebate o rosa com o pulo no ar e quica nele (+1 chama)'],
+      [bl('solo', 'dash'), 'Dash. A CANDELA rebate o rosa com o dash (e ele fica livre)'],
+      [bl('solo', 'shoot'), 'Atirar (segure) · ' + bl('solo', 'swap', 1) + ' troca de arma'],
       [bl('solo', 'ex'), 'Golpe EX (1 chama) · SUPER Labareda (5 chamas)'],
-      [bl('solo', 'lock'), 'Travar posição para mirar em 8 direções'],
+      [bl('solo', 'lock', 1), 'Travar posição para mirar em 8 direções'],
+      ['Mapa', 'Z entra · X abre o inventário · a loja é o primeiro ponto'],
       ['Esc / P', 'Pausar · M som · troque as teclas em Opções'],
     ];
-    const pl = (pr) => ['left', 'right', 'up', 'down'].map((a) => bl(pr, a, 1)).join('') + ' mover · ' + bl(pr, 'jump', 1) + ' pular · ' + bl(pr, 'shoot', 1) + ' atirar · ' + bl(pr, 'dash', 1) + ' dash · ' + bl(pr, 'ex', 1) + ' EX';
+    const pl = (pr) => ['left', 'right', 'up', 'down'].map((a) => bl(pr, a, 1)).join('') + ' mover · ' + bl(pr, 'jump', 1) + ' pular · ' + bl(pr, 'shoot', 1) + ' atirar · ' + bl(pr, 'dash', 1) + ' dash · ' + bl(pr, 'ex', 1) + ' EX · ' + bl(pr, 'swap', 1) + ' arma';
     const coop = [
       ['Jogador 1', pl('p1')],
       ['Jogador 2', pl('p2')],
       ['Teclas', 'Troque as teclas de cada jogador em Opções'],
-      ['Controles', 'Controle 1 = J1, Controle 2 = J2 (A pular, X atirar, RB dash, B EX)'],
+      ['Controles', 'Controle 1 = J1, Controle 2 = J2 (A pular, X atirar, RB dash, B EX, Y arma)'],
       ['Fantasma', 'Quem cair vira fantasma: o parceiro REBATE o coração rosa para reviver'],
       ['Chefões', 'Ficam mais resistentes no modo de 2 jogadores'],
     ];
     const lines = this.helpPage ? coop : solo;
     lines.forEach(([k, v], i) => {
-      ctx.font = `19px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.textAlign = 'right'; ctx.fillText(k, 285, 130 + i * 44);
-      ctx.font = `17px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(v, 302, 130 + i * 44);
+      const ry = 120 + i * (this.helpPage ? 44 : 36);
+      ctx.font = `18px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.textAlign = 'right'; ctx.fillText(k, 250, ry);
+      ctx.font = `15px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(v, 266, ry);
     });
     ctx.font = `16px ${FONT_TEXT}`; ctx.textAlign = 'center';
-    ctx.fillText('Fósforo: tiro reto e longo · Candela: leque de cera, forte de perto', W / 2, 455);
+    ctx.fillText('Rosa: poucos aparecem por luta e sempre em lugares diferentes', W / 2, 455);
     ctx.fillText('←/→ trocar página · Z para voltar', W / 2, 484);
   }
 }
@@ -733,33 +790,62 @@ function sunburstClip(cx, cy, t) {
 }
 
 // ---------- Cena: Mapa de Vila Vinil ----------
-// nó 0 = loja, nós 1..6 = chefões, último = Farol
-const NODES = [{ x: 92, y: 262 }, { x: 175, y: 432 }, { x: 300, y: 265 }, { x: 430, y: 432 }, { x: 560, y: 265 }, { x: 690, y: 432 }, { x: 812, y: 275 }, { x: 900, y: 472 }];
+// Os pontos do caminho, em ordem: loja, 6 chefões, 3 fases de moedas (Run 'n' Gun) e o Farol
+const MAP_ITEMS = [
+  { type: 'shop' }, { type: 'boss', i: 0 }, { type: 'rg', i: 0 }, { type: 'boss', i: 1 }, { type: 'boss', i: 2 },
+  { type: 'rg', i: 1 }, { type: 'boss', i: 3 }, { type: 'boss', i: 4 }, { type: 'rg', i: 2 }, { type: 'boss', i: 5 }, { type: 'light' },
+];
+const NODES = [{ x: 78, y: 262 }, { x: 150, y: 430 }, { x: 225, y: 285 }, { x: 305, y: 430 }, { x: 390, y: 272 }, { x: 470, y: 430 },
+  { x: 552, y: 280 }, { x: 635, y: 430 }, { x: 715, y: 285 }, { x: 795, y: 430 }, { x: 888, y: 300 }];
 function drawShopIcon(t, sel) {
   ink(4); rrect(-40, -30, 80, 56, 6, '#c9933a');
   ctx.beginPath(); ctx.moveTo(-48, -28); ctx.lineTo(0, -58); ctx.lineTo(48, -28); ctx.closePath(); ctx.fillStyle = '#7a1f2a'; ctx.fill(); ctx.stroke();
-  // toldo listrado
   for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 2 ? '#fff6e0' : '#c8352b'; ctx.fillRect(-40 + i * 13.3, -30, 13.3, 12); }
   ink(3); ctx.strokeRect(-40, -30, 80, 12);
   rrect(-12, -6, 24, 32, 3, '#5a3420');
   ink(2); rrect(-34, -4, 16, 14, 2, '#ffe9a8'); rrect(18, -4, 16, 14, 2, '#ffe9a8');
   drawCoin(0, -42, 9 + (sel ? Math.sin(t * 6) : 0), t);
 }
+// placa de "Corrida de Moedas": bandeira xadrez + moedinhas
+function drawRGIcon(t, sel, got, total) {
+  ink(4); rrect(-40, -40, 80, 62, 8, sel ? '#fff6e0' : PAPER);
+  ctx.font = `13px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('Corrida', 0, -28);
+  for (let k = 0; k < total; k++) { const cx = -25 + k * 10; ctx.beginPath(); ctx.arc(cx, -8, 4.2, 0, TAU); ctx.fillStyle = k < got ? '#f2c14a' : 'rgba(26,20,16,.18)'; ctx.fill(); ink(1.5); ctx.stroke(); }
+  ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = got >= total ? '#2f8a4a' : 'rgba(26,20,16,.7)'; ctx.fillText(`${got}/${total} moedas`, 0, 10);
+  // bandeirinha xadrez
+  ctx.save(); ctx.translate(30, -42); ink(2.5); ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, -22); ctx.stroke();
+  for (let a = 0; a < 3; a++) for (let b = 0; b < 2; b++) { ctx.fillStyle = (a + b) % 2 ? INK : '#fff'; ctx.fillRect(1 + a * 6, -22 + b * 6 + Math.sin(t * 6 + a) * 1.2, 6, 6); }
+  ctx.restore();
+}
 class MapScene {
-  // bossIdx: -1 = loja, 0..5 = chefão, 6 = Farol
-  constructor(bossIdx = 0) {
-    this.sel = clamp(bossIdx + 1, 0, BOSSES.length + 1); this.t = 0;
+  // sel = posição em MAP_ITEMS. Atalhos: MapScene.boss(i), .rg(i), .shop(), .light()
+  constructor(sel = 1) {
+    this.sel = clamp(sel, 0, MAP_ITEMS.length - 1); this.t = 0;
     this.px = NODES[this.sel].x; this.py = NODES[this.sel].y; Music.play('map');
     if (Net.role === 'host' && Net.connected) Net.send({ t: 'map', sel: this.sel });
   }
+  static at(type, i) { return new MapScene(MAP_ITEMS.findIndex((m) => m.type === type && m.i === i)); }
+  static boss(i) { return MapScene.at('boss', i); }
+  static rg(i) { return MapScene.at('rg', i); }
+  static shop() { return MapScene.at('shop'); }
+  static light() { return MapScene.at('light'); }
   allDone() { return BOSSES.every((b) => Save.data.grades[b.id]); }
+  rgGot(i) { const r = Save.data.rg[LEVELS[i].id]; return r ? r.got.filter(Boolean).length : 0; }
+  start(it) {
+    // antes de cada luta: tela de equipamento (Z já deixa em "Lutar!"), se o jogador tem itens
+    const go = () => (it.type === 'boss' ? new Fight(it.i) : new RunGun(it.i));
+    if (it.type === 'rg' && Net.connected) { Game.toast("As fases de moedas ainda não funcionam online."); Snd.play('hurt'); return; }
+    if (Save.data.owned.length) Game.go(new Inventory((ok) => Game.go(ok ? go() : new MapScene(this.sel)), true));
+    else Game.go(go());
+  }
   update(dt) {
     this.t += dt;
-    const max = this.allDone() ? BOSSES.length + 1 : BOSSES.length;
+    const last = MAP_ITEMS.length - 1, max = this.allDone() ? last : last - 1;
     if (Net.role === 'guest' && Net.connected) {
-      // convidado: quem escolhe a fase é o anfitrião; daqui dá para abrir a loja
+      // convidado: quem escolhe a fase é o anfitrião; daqui dá para abrir a loja e o inventário
       const n = NODES[this.sel]; this.px = lerp(this.px, n.x, dt * 8); this.py = lerp(this.py, n.y, dt * 8);
       if (pressed.jump || pressed.start) { Snd.play('confirm'); Game.go(new Shop()); }
+      if (pressed.shoot) { Snd.play('confirm'); Game.go(new Inventory(() => Game.go(new MapScene(this.sel)), null)); }
       if (backPressed()) { Net.leave(); Game.go(new Title()); }
       return;
     }
@@ -770,15 +856,16 @@ class MapScene {
     if (this.sel !== prevSel && Net.role === 'host' && Net.connected) Net.send({ t: 'mapsel', sel: this.sel });
     if (backPressed()) { Game.go(new Title()); return; }
     InputMode.coop = Game.mode.coop && !Game.mode.online;
+    const it = MAP_ITEMS[this.sel];
+    if (pressed.shoot && it.type !== 'light') { Snd.play('confirm'); Game.go(new Inventory(() => Game.go(new MapScene(this.sel)), null)); return; }
     if (pressed.jump || pressed.start) {
       Snd.play('confirm');
-      if (this.sel === 0) Game.go(new Shop());
-      else if (this.sel <= BOSSES.length) Game.go(new Fight(this.sel - 1));
-      else Game.go(new Story(STORY_END, () => Game.go(new Title()), 'ending'));
+      if (it.type === 'shop') Game.go(new Shop());
+      else if (it.type === 'light') Game.go(new Story(STORY_END, () => Game.go(new Title()), 'ending'));
+      else this.start(it);
     }
   }
   draw() {
-    // mar e ilha
     ctx.fillStyle = '#6f98a8'; ctx.fillRect(0, 0, W, H);
     ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 2;
     for (let i = 0; i < 16; i++) { const x = (i * 137 + this.t * 15) % (W + 60) - 30, y = 90 + ((i * 89) % 440); ctx.beginPath(); ctx.arc(x, y, 10, Math.PI, TAU); ctx.arc(x + 20, y, 10, Math.PI, TAU); ctx.stroke(); }
@@ -791,40 +878,39 @@ class MapScene {
     for (const [x, y, r] of [[200, 200, 40], [460, 190, 50], [740, 200, 45], [360, 360, 35], [620, 360, 38], [860, 380, 30]]) {
       circle(x, y, r, '#9fb06a', false); ctx.fillStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.4, 0, TAU); ctx.fill();
     }
-    // caminho
     ctx.setLineDash([10, 10]); ink(4); ctx.beginPath(); ctx.moveTo(NODES[0].x, NODES[0].y);
     for (let i = 1; i < NODES.length; i++) ctx.lineTo(NODES[i].x, NODES[i].y);
     ctx.stroke(); ctx.setLineDash([]);
-    // nós
     const done = this.allDone(), N = BOSSES.length;
     NODES.forEach((n, i) => {
-      const sel = i === this.sel;
+      const sel = i === this.sel, it = MAP_ITEMS[i];
       ctx.save(); ctx.translate(n.x, n.y - 40);
       const bob = sel ? Math.sin(this.t * 5) * 0.04 : 0;
       ctx.scale(1 + (sel ? 0.1 : 0) + bob, 1 + (sel ? 0.1 : 0) + bob);
-      if (i === 0) drawShopIcon(this.t, sel);
-      else if (i <= N) {
-        const B = BOSSES[i - 1];
-        ink(4); rrect(-46, -44, 92, 70, 8, sel ? '#fff6e0' : PAPER);
-        ctx.font = `15px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(B.short, 0, -28);
+      if (it.type === 'shop') drawShopIcon(this.t, sel);
+      else if (it.type === 'boss') {
+        const B = BOSSES[it.i];
+        ink(4); rrect(-40, -44, 80, 70, 8, sel ? '#fff6e0' : PAPER);
+        ctx.font = `14px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(B.short, 0, -28);
         const g = Save.data.grades[B.id];
         if (g) { ctx.font = `24px ${FONT_TITLE}`; ctx.fillStyle = '#c8352b'; ctx.fillText(g, 0, -2); const gd = DIFFS[(Save.data.gradeDiff || {})[B.id] || 'normal']; ctx.font = `11px ${FONT_TEXT}`; ctx.fillStyle = gd.color; ctx.fillText(gd.name, 0, 16); }
         else { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.6)'; ctx.fillText('???', 0, 2); }
-        if (g) star(36, -36, 9, '#ffd84a');
-      } else { ctx.translate(0, 40); ctx.scale(0.33, 0.33); drawLighthouse(0, 40, done, this.t); }
+        if (g) star(32, -36, 9, '#ffd84a');
+      } else if (it.type === 'rg') drawRGIcon(this.t, sel, this.rgGot(it.i), COINS_PER_LEVEL);
+      else { ctx.translate(0, 40); ctx.scale(0.33, 0.33); drawLighthouse(0, 40, done, this.t); }
       ctx.restore();
     });
     Game.mode.chars.forEach((c, i) => drawHero(c, this.px + (Game.mode.chars.length > 1 ? (i ? 16 : -16) : 0), this.py + 52, { dance: true, t: this.t + i * 0.4, scale: 0.75, facing: i ? -1 : 1 }));
-    // painel de informações
     ink(5); rrect(20, 14, 920, 62, 12, PAPER);
-    const info = this.sel === 0 ? 'Empório do Seu Lampião — compre armas e amuletos'
-      : this.sel <= N ? `${BOSSES[this.sel - 1].place} — ${BOSSES[this.sel - 1].name}`
-        : (done ? 'O Farol — leve as brasas para casa!' : `O Farol (derrote os ${N} chefões)`);
+    const it = MAP_ITEMS[this.sel];
+    const info = it.type === 'shop' ? 'Empório do Seu Lampião — compre armas e amuletos'
+      : it.type === 'boss' ? `${BOSSES[it.i].place} — ${BOSSES[it.i].name}`
+        : it.type === 'rg' ? `${LEVELS[it.i].name} — corra, atire e junte as moedas`
+          : (done ? 'O Farol — leve as brasas para casa!' : `O Farol (derrote os ${N} chefões)`);
     outlinedText('Vila Vinil', 110, 45, 30, '#ffd84a');
     ctx.font = `19px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(info, 220, 45);
     ctx.font = `13px ${FONT_TEXT}`; ctx.textAlign = 'right';
-    ctx.fillText(Net.role === 'guest' && Net.connected ? 'Online: o outro aparelho escolhe a fase · Z abre a loja' : Net.connected ? 'Online · ←/→ andar · Z entrar' : '←/→ andar · Z entrar · Esc título', 925, 66);
-    // contadores
+    ctx.fillText(Net.role === 'guest' && Net.connected ? 'Online: o outro aparelho escolhe a fase · Z loja · X inventário' : Net.connected ? 'Online · ←/→ andar · Z entrar · X inventário' : '←/→ andar · Z entrar · X inventário · Esc título', 925, 66);
     const brasas = BOSSES.filter((b) => Save.data.grades[b.id]).length, D = curDiff();
     const chip = (x, w, draw) => { ink(4); rrect(x, 86, w, 34, 9, PAPER); draw(x); };
     chip(20, 140, (x) => { star(x + 20, 103, 10, '#ff9a2e'); ctx.font = `17px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(`Brasas ${brasas}/${N}`, x + 36, 104); });

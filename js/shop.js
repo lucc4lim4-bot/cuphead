@@ -1,41 +1,105 @@
 'use strict';
-// ===== Loja do Seu Lampião: moedas, armas e amuletos =====
+// ===== Loja do Seu Lampião, inventário e economia de moedas =====
 
 const ITEMS = [
   { id: 'w_homing', type: 'weapon', name: 'Rajada Teleguiada', price: 4, desc: 'Faíscas que perseguem o chefão. Dano menor, mas quase nunca erram.' },
   { id: 'w_twin', type: 'weapon', name: 'Tiro Duplo', price: 5, desc: 'Duas faíscas paralelas de uma vez. Ótimo contra alvos grandes.' },
+  { id: 'w_fan', type: 'weapon', name: 'Leque de Cera', price: 4, desc: 'Três gotas em leque: curto alcance, dano alto de perto. A arma que era da Candela!' },
   { id: 'w_bomb', type: 'weapon', name: 'Bombinha', price: 5, desc: 'Bombas em arco que explodem com muito dano. Mais lentas de atirar.' },
   { id: 'c_heart', type: 'charm', name: 'Coração Extra', price: 3, desc: '+1 PV no começo de cada luta. Em troca, o tiro fica 5% mais fraco.' },
   { id: 'c_coffee', type: 'charm', name: 'Cafezinho', price: 3, desc: 'O medidor de chamas enche sozinho, devagarinho, durante a luta.' },
   { id: 'c_smoke', type: 'charm', name: 'Bomba de Fumaça', price: 4, desc: 'O dash vira fumaça: você fica invencível enquanto ele dura!' },
   { id: 'c_magnet', type: 'charm', name: 'Ímã Rosa', price: 2, desc: 'Rebater fica mais fácil: mais alcance e mais tempo para acertar.' },
   { id: 'c_bubble', type: 'charm', name: 'Bolha Protetora', price: 5, desc: 'Uma bolha absorve 1 golpe. Ela volta depois de 25 segundos.' },
-  { id: 'c_spring', type: 'charm', name: 'Sapato de Mola', price: 4, desc: 'Pulo duplo! O segundo pulo também serve para rebater rosa.' },
+  { id: 'c_spring', type: 'charm', name: 'Sapato de Mola', price: 4, desc: 'Um pulo extra (a Candela ganha o terceiro). No Fósforo, o pulo extra também rebate rosa.' },
 ];
 const ITEM_BY_ID = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
+const ITEM_TOTAL_COST = ITEMS.reduce((a, i) => a + i.price, 0);
+const SHOP_SLOTS = 6;
+// notas de 1 a 5 para comparar as armas no inventário
+const WEAPON_STATS = {
+  spark: { Dano: 3, Alcance: 5, Cadência: 4, Precisão: 3 },
+  w_homing: { Dano: 2, Alcance: 4, Cadência: 4, Precisão: 5 },
+  w_twin: { Dano: 3, Alcance: 5, Cadência: 4, Precisão: 4 },
+  w_fan: { Dano: 5, Alcance: 1, Cadência: 4, Precisão: 4 },
+  w_bomb: { Dano: 4, Alcance: 3, Cadência: 1, Precisão: 2 },
+};
 
-// ---------- Moedas e equipamento salvos ----------
-(function initShopSave() {
-  const d = Save.data;
-  if (typeof d.coins !== 'number') d.coins = 4 + 2 * Object.keys(d.grades || {}).length; // presente de boas-vindas
-  d.owned = d.owned || [];
-  d.loadout = d.loadout || {};
-  for (const h of ['fosforo', 'candela']) d.loadout[h] = Object.assign({ weapon: null, charm: null }, d.loadout[h] || {});
-  Save.write();
-})();
-const loadoutOf = (hero) => Save.data.loadout[hero] || { weapon: null, charm: null };
+// ---------- Economia: moedas = ganhas − preço dos itens comprados ----------
+const itemCost = (id) => (ITEM_BY_ID[id] ? ITEM_BY_ID[id].price : 0);
+function recalcCoins() { const d = Save.data; d.coins = Math.max(0, (d.earned || 0) - (d.owned || []).reduce((a, id) => a + itemCost(id), 0)); }
+function addCoins(n) { Save.data.earned = (Save.data.earned || 0) + n; recalcCoins(); Save.write(); }
+const loadoutOf = (hero) => Save.data.loadout[hero] || { weapon: null, weapon2: null, charm: null };
 const owns = (id) => Save.data.owned.includes(id);
+function mulberry32(a) { return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 
+// Moedas finitas e desenháveis: a 1ª vitória paga bem; repetir paga só 1 (sem fazenda de moedas)
 function coinsForWin(grade, diffId, firstClear) {
-  let n = diffId === 'easy' ? 1 : 2;
-  if (firstClear) n += 3;
+  if (!firstClear) return 1;
+  let n = 4;
   if (GRADE_ORDER.indexOf(grade) >= GRADE_ORDER.indexOf('A-')) n += 1;
   if (grade === 'S') n += 1;
   if (diffId === 'hard') n += 1;
   if (diffId === 'nightmare') n += 2;
   return n;
 }
-function addCoins(n) { Save.data.coins += n; Save.write(); }
+
+// ---------- Loja rotativa (determinística: a ordem vem de uma semente do save) ----------
+function initShop() {
+  const d = Save.data;
+  if (!d.shop || !Array.isArray(d.shop.queue)) {
+    const seed = (Math.random() * 2147483647) | 0, rnd = mulberry32(seed);
+    const ids = ITEMS.map((i) => i.id);
+    for (let i = ids.length - 1; i > 0; i--) { const j = (rnd() * (i + 1)) | 0; [ids[i], ids[j]] = [ids[j], ids[i]]; }
+    // garante pelo menos 1 arma e 1 amuleto entre os primeiros a aparecer
+    for (const type of ['weapon', 'charm']) {
+      const first = ids.slice(0, SHOP_SLOTS);
+      if (!first.some((id) => ITEM_BY_ID[id].type === type)) {
+        const k = ids.findIndex((id, idx) => idx >= SHOP_SLOTS && ITEM_BY_ID[id].type === type);
+        if (k > 0) [ids[SHOP_SLOTS - 1], ids[k]] = [ids[k], ids[SHOP_SLOTS - 1]];
+      }
+    }
+    d.shop = { seed, queue: ids, slots: [], serial: 0 };
+  }
+}
+function shopNext() {
+  // próximo item que espera na fila (e ainda não foi obtido nem está à venda)
+  const sh = Save.data.shop, shown = new Set(sh.slots.map((s) => s.id));
+  const k = sh.queue.findIndex((id) => !owns(id) && !shown.has(id));
+  return k < 0 ? null : sh.queue.splice(k, 1)[0];
+}
+function shopSanitize() {
+  initShop();
+  const sh = Save.data.shop;
+  for (const it of ITEMS) if (!sh.queue.includes(it.id) && !sh.slots.some((s) => s && s.id === it.id) && !owns(it.id)) sh.queue.push(it.id); // itens novos
+  sh.slots = sh.slots.filter((s) => s && !owns(s.id));          // o que foi comprado sai da vitrine
+  sh.queue = sh.queue.filter((id) => !owns(id));
+  while (sh.slots.length < SHOP_SLOTS) { const id = shopNext(); if (!id) break; sh.slots.push({ id, n: ++sh.serial }); }
+}
+// compra: o item sai e um novo, ainda não obtido, entra no lugar na hora
+function shopBuy(id) {
+  const sh = Save.data.shop, k = sh.slots.findIndex((s) => s.id === id);
+  Save.data.owned.push(id); recalcCoins();
+  sh.slots.splice(k, 1); const nid = shopNext();
+  if (nid) sh.slots.splice(k, 0, { id: nid, n: ++sh.serial });
+  Save.write(); return nid;
+}
+// novidade por progresso: a 1ª vitória em cada fase troca o item que está há mais tempo na vitrine
+function shopRotateOldest() {
+  const sh = Save.data.shop; if (!sh.slots.length || !sh.queue.length) return false;
+  let k = 0; sh.slots.forEach((s, i) => { if (s.n < sh.slots[k].n) k = i; });
+  const old = sh.slots[k].id, nid = shopNext(); if (!nid) return false;
+  sh.slots[k] = { id: nid, n: ++sh.serial }; sh.queue.push(old); Save.write(); return true;
+}
+// chamado quando um save é carregado ou criado
+function afterSlotLoad() {
+  const d = Save.data;
+  d.owned = d.owned || []; d.grades = d.grades || {}; d.gradeDiff = d.gradeDiff || {}; d.best = d.best || {}; d.rg = d.rg || {};
+  if (typeof d.earned !== 'number') d.earned = (d.coins || 0) + d.owned.reduce((a, id) => a + itemCost(id), 0); // save antigo
+  d.loadout = d.loadout || {};
+  for (const h of ['fosforo', 'candela']) d.loadout[h] = Object.assign({ weapon: null, weapon2: null, charm: null }, d.loadout[h] || {});
+  recalcCoins(); shopSanitize(); Save.write();
+}
 
 // ---------- Ícones ----------
 function drawCoin(x, y, r = 10, t = 0) {
@@ -51,6 +115,11 @@ function drawItemIcon(id, x, y, s = 1, t = 0) {
   ctx.save(); ctx.translate(x, y); ctx.scale(s, s);
   const fire = ['#d8341c', '#ff8a1e', '#ffe56a'];
   switch (id) {
+    case 'spark': { ctx.save(); ctx.rotate(Math.PI / 2); drawFlame(0, 10, 0.9, t, fire); ctx.restore(); break; }
+    case 'w_fan': {
+      for (const a of [-0.5, 0, 0.5]) { ctx.save(); ctx.rotate(a); ctx.translate(14, 0); ctx.beginPath(); ctx.ellipse(0, 0, 11, 6, 0, 0, TAU); ctx.fillStyle = '#8fc6f2'; ctx.fill(); ink(2.5); ctx.stroke(); shine(3, -2, 3, 1.6, 0, 0.8); ctx.restore(); }
+      ink(3); circle(-18, 0, 6, '#d6e9fb'); break;
+    }
     case 'w_homing': {
       ctx.setLineDash([5, 5]); ink(3); ctx.beginPath(); ctx.moveTo(-26, 16); ctx.bezierCurveTo(-20, -24, 14, -22, 18, 4); ctx.stroke(); ctx.setLineDash([]);
       ctx.save(); ctx.translate(18, 4); ctx.rotate(1.4); drawFlame(0, 8, 0.8, t, fire); ctx.restore();
@@ -172,94 +241,217 @@ function speechBubble(x, y, w, text, tail = 'left') {
   lines.forEach((l, i) => ctx.fillText(l, x + 14, y + 11 + i * 20));
 }
 
+
 // ---------- Cena da loja ----------
 class Shop {
   constructor() {
     this.t = 0; this.sel = 0; this.talk = 0; this.happy = 0; this.shake = 0;
     this.hero = Net.role === 'guest' ? Net.myHero : (Game.mode.chars[0] || 'fosforo');
-    this.line = 'Bem-vindo ao Empório! Moedas brilhando? Então vamos negociar!';
-    Music.play('shop');
+    this.line = 'Bem-vindo ao Empório! A vitrine muda a cada compra e a cada chefe vencido. Escolha bem!';
+    shopSanitize(); Music.play('shop');
   }
   say(txt) { this.line = txt; this.talk = 1.2; }
+  slots() { return Save.data.shop.slots; }
   update(dt) {
     this.t += dt; Particles.update(dt); this.talk = Math.max(0, this.talk - dt); this.happy = Math.max(0, this.happy - dt * 1.5); this.shake = Math.max(0, this.shake - dt * 3);
+    const sl = this.slots(), n = sl.length;
+    if (this.sel >= n) this.sel = Math.max(0, n - 1);
     const col = this.sel % 3, row = (this.sel / 3) | 0;
     let moved = false;
     if (pressed.left && col > 0) { this.sel--; moved = true; }
-    if (pressed.right && col < 2) { this.sel++; moved = true; }
+    if (pressed.right && col < 2 && this.sel + 1 < n) { this.sel++; moved = true; }
     if (pressed.up && row > 0) { this.sel -= 3; moved = true; }
-    if (pressed.down && row < 2) { this.sel += 3; moved = true; }
-    if (moved) { Snd.play('select'); const it = ITEMS[this.sel]; this.say(it.desc); }
-    if (pressed.dash || pressed.ex) { this.hero = this.hero === 'fosforo' ? 'candela' : 'fosforo'; Snd.play('select'); this.say(`Equipando ${HEROES[this.hero].name} agora. Cada herói tem sua própria arma e amuleto!`); }
-    if (backPressed()) { Snd.play('confirm'); if (Net.connected && Net.role === 'guest') Net.send({ t: 'loadout', loadout: loadoutOf(Net.myHero) }); Game.go(new MapScene(-1)); return; }
-    if (pressed.jump || pressed.start || pressed.shoot) this.choose(ITEMS[this.sel]);
+    if (pressed.down && row < 1 && this.sel + 3 < n) { this.sel += 3; moved = true; }
+    if (moved && sl[this.sel]) { Snd.play('select'); this.say(ITEM_BY_ID[sl[this.sel].id].desc); }
+    const heroes = Net.connected ? [Net.myHero] : ['fosforo', 'candela'];
+    if ((pressed.dash || pressed.ex) && heroes.length > 1) { this.hero = this.hero === 'fosforo' ? 'candela' : 'fosforo'; Snd.play('select'); this.say(`Agora equipando ${HEROES[this.hero].name}. Cada herói tem o seu equipamento!`); }
+    if (pressed.shoot) { Snd.play('confirm'); Game.go(new Inventory(() => Game.go(new Shop()), null)); return; }
+    if (backPressed()) { Snd.play('confirm'); Game.go(MapScene.shop()); return; }
+    if ((pressed.jump || pressed.start) && sl[this.sel]) this.buy(ITEM_BY_ID[sl[this.sel].id]);
   }
-  choose(it) {
-    const lo = loadoutOf(this.hero), slot = it.type === 'weapon' ? 'weapon' : 'charm';
-    if (!owns(it.id)) {
-      if (Save.data.coins < it.price) { Snd.play('hurt'); this.shake = 1; this.say(`Ih, faltam ${it.price - Save.data.coins} moeda(s)! Vença mais chefões e volte aqui.`); return; }
-      Save.data.coins -= it.price; Save.data.owned.push(it.id);
-      lo[slot] = it.id; Save.write();
-      Snd.play('win'); this.happy = 1; Particles.stars(this.cardPos(this.sel).x + 85, this.cardPos(this.sel).y + 45, 10, '#ffd84a');
-      this.say(`Negócio fechado! ${it.name} já está equipado no ${HEROES[this.hero].name}.`);
-      return;
-    }
-    if (lo[slot] === it.id) { lo[slot] = null; Snd.play('select'); this.say(slot === 'weapon' ? `${HEROES[this.hero].name} volta para a arma de sempre.` : 'Amuleto guardado no bolso.'); }
-    else { lo[slot] = it.id; Snd.play('parry'); this.say(`${it.name} equipado no ${HEROES[this.hero].name}!`); }
+  buy(it) {
+    if (Save.data.coins < it.price) { Snd.play('hurt'); this.shake = 1; this.say(`Ih, faltam ${it.price - Save.data.coins} moeda(s)! Vença chefões e corra nas fases de moedas.`); return; }
+    const pos = this.cardPos(this.sel);
+    Save.data.coins -= it.price;
+    const next = shopBuy(it.id);
+    // equipa sozinho no primeiro espaço livre do herói
+    const lo = loadoutOf(this.hero); let where = '';
+    if (it.type === 'weapon') { if (!lo.weapon) { lo.weapon = it.id; where = 'na arma 1'; } else if (!lo.weapon2) { lo.weapon2 = it.id; where = 'na arma 2'; } }
+    else if (!lo.charm) { lo.charm = it.id; where = 'no amuleto'; }
     Save.write();
+    Snd.play('win'); this.happy = 1; Particles.stars(pos.x + 85, pos.y + 45, 10, '#ffd84a');
+    this.say(`Negócio fechado! ${it.name}${where ? ` equipado ${where} do ${HEROES[this.hero].name}` : ' foi para o seu inventário (X)'}. ${next ? 'Chegou item novo na vitrine!' : 'A vitrine está esvaziando!'}`);
   }
   cardPos(i) { return { x: 398 + (i % 3) * 184, y: 104 + ((i / 3) | 0) * 126 }; }
   draw() {
-    // parede e prateleiras
     const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#5a3420'); g.addColorStop(1, '#3a2014'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = 'rgba(255,220,170,.05)'; for (let x = 0; x < W; x += 48) ctx.fillRect(x, 0, 24, H);
     ctx.fillStyle = 'rgba(255,230,160,.12)'; ctx.beginPath(); ctx.arc(190, 150, 230, 0, TAU); ctx.fill();
-    // placa
     ink(5); rrect(36, 14, 320, 58, 10, '#2f4a32');
     ctx.strokeStyle = '#e0b04a'; ctx.lineWidth = 2; rrect(44, 22, 304, 42, 7, null);
     outlinedText('Empório do Seu Lampião', 196, 44, 23, '#ffd84a', FONT_TITLE, 'center', 5);
-    // lojista e balcão
     drawShopkeeper(190, 420, this.t, this.talk > 0 ? 1 : 0, this.happy);
     shape(pRRect(-10, 400, 380, 160, 10), '#7a4a26', 6, 'rgba(0,0,0,.35)', 0, -10);
     ctx.fillStyle = '#9c6234'; ctx.fillRect(-10, 400, 380, 16); ink(4); ctx.strokeRect(-10, 400, 380, 16);
-    // balão de fala
     speechBubble(30, 86, 330, this.line);
-    // moedas
     ink(4); rrect(36, 428, 150, 40, 10, '#fff6e0');
     drawCoin(62, 448, 13, this.t);
     outlinedText(`${Save.data.coins}`, 120, 449, 26, '#f2c14a', FONT_TITLE, 'center', 6);
-    // herói equipando
     const lo = loadoutOf(this.hero);
     ink(4); rrect(196, 428, 166, 96, 10, '#fff6e0');
     ctx.save(); ctx.beginPath(); ctx.rect(198, 430, 60, 92); ctx.clip(); drawHero(this.hero, 228, 512, { scale: 0.95, t: this.t, dance: this.happy > 0 }); ctx.restore();
     ctx.font = `14px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText(HEROES[this.hero].name, 262, 444);
     ctx.font = `11px ${FONT_TEXT}`;
-    ctx.fillText('Arma:', 262, 466); ctx.fillText('Amuleto:', 262, 496);
-    if (lo.weapon) drawItemIcon(lo.weapon, 344, 466, 0.42, this.t); else { ctx.fillText(this.hero === 'candela' ? 'Leque' : 'Faíscas', 300, 466); }
-    if (lo.charm) drawItemIcon(lo.charm, 344, 496, 0.42, this.t); else ctx.fillText('nenhum', 318, 496);
-    ctx.fillText('C: trocar', 262, 514);
-    // prateleira de itens
-    ITEMS.forEach((it, i) => {
-      const p = this.cardPos(i), sel = i === this.sel, has = owns(it.id);
-      const eq = lo.weapon === it.id || lo.charm === it.id;
+    [['Arma 1', lo.weapon, 464], ['Arma 2', lo.weapon2, 484], ['Amuleto', lo.charm, 504]].forEach(([lab, id, yy]) => {
+      ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.fillText(lab, 262, yy);
+      if (id) drawItemIcon(id, 344, yy, 0.34, this.t); else ctx.fillText('—', 338, yy);
+    });
+    // vitrine
+    const sl = this.slots();
+    for (let i = 0; i < SHOP_SLOTS; i++) {
+      const p = this.cardPos(i), s = sl[i];
       ctx.save(); ctx.translate(p.x + 85, p.y + 56);
+      if (!s) {
+        ink(3); ctx.setLineDash([8, 6]); rrect(-85, -56, 170, 112, 10, 'rgba(0,0,0,.2)'); ctx.setLineDash([]);
+        ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(244,231,197,.55)'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(i === sl.length ? 'Em breve…' : '', 0, 0);
+        ctx.restore(); continue;
+      }
+      const it = ITEM_BY_ID[s.id], sel = i === this.sel, isNew = s.n > Save.data.shop.serial - 1 && this.t < 8;
       if (sel) { const k = 1.05 + Math.sin(this.t * 6) * 0.015; ctx.scale(k, k); ctx.rotate(Math.sin(this.t * 3) * 0.01); if (this.shake) ctx.translate(Math.sin(this.t * 60) * this.shake * 5, 0); }
-      ctx.fillStyle = 'rgba(0,0,0,.35)'; rrect(-81, -50, 170, 112, 10, 'rgba(0,0,0,.35)', false);
-      ink(sel ? 5 : 4); rrect(-85, -56, 170, 112, 10, eq ? '#ffe9b0' : has ? '#f2ead6' : PAPER);
-      ctx.fillStyle = it.type === 'weapon' ? '#c8352b' : '#3a6fb0'; ctx.fillRect(-85 + 2, -54, 166, 6);
+      rrect(-81, -50, 170, 112, 10, 'rgba(0,0,0,.35)', false);
+      ink(sel ? 5 : 4); rrect(-85, -56, 170, 112, 10, PAPER);
+      ctx.fillStyle = it.type === 'weapon' ? '#c8352b' : '#3a6fb0'; ctx.fillRect(-83, -54, 166, 6);
       ctx.font = `10px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.6)'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
       ctx.fillText(it.type === 'weapon' ? 'ARMA' : 'AMULETO', -76, -40);
       drawItemIcon(it.id, 0, -10, 0.9, this.t + i);
       ctx.font = `14px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.fillText(it.name, 0, 26);
-      if (eq) { ctx.font = `13px ${FONT_TITLE}`; ctx.fillStyle = '#2f8a4a'; ctx.fillText('★ EQUIPADO', 0, 44); }
-      else if (has) { ctx.font = `13px ${FONT_TEXT}`; ctx.fillStyle = '#6a5a4a'; ctx.fillText('comprado · equipar', 0, 44); }
-      else { drawCoin(-14, 44, 8, 0); ctx.font = `15px ${FONT_TITLE}`; ctx.fillStyle = Save.data.coins >= it.price ? INK : '#a33'; ctx.textAlign = 'left'; ctx.fillText(`${it.price}`, -2, 45); }
+      drawCoin(-14, 44, 8, 0); ctx.font = `15px ${FONT_TITLE}`; ctx.fillStyle = Save.data.coins >= it.price ? INK : '#a33'; ctx.textAlign = 'left'; ctx.fillText(`${it.price}`, -2, 45);
       if (sel) { ctx.strokeStyle = '#ffd84a'; ctx.lineWidth = 3; ctx.setLineDash([8, 6]); ctx.lineDashOffset = -this.t * 30; rrect(-91, -62, 182, 124, 13, null); ctx.setLineDash([]); }
       ctx.restore();
-    });
+    }
+    // próxima chegada (silhueta): ajuda a planejar sem revelar tudo
+    const sh = Save.data.shop, nxt = sh.queue.find((id) => !owns(id) && !sh.slots.some((x) => x.id === id));
+    ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(244,231,197,.75)'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(nxt ? `Próxima chegada: ${ITEM_BY_ID[nxt].type === 'weapon' ? 'uma arma' : 'um amuleto'} (${sh.queue.filter((id) => !owns(id)).length} na fila)` : 'Sem mais novidades: você já viu tudo!', 398, 360);
     Particles.draw();
-    ctx.font = `13px ${FONT_TEXT}`; ctx.fillStyle = CREAM; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('Setas: escolher · Z: comprar/equipar · C: trocar herói · Esc: voltar ao mapa', 664, 498);
+    ctx.font = `13px ${FONT_TEXT}`; ctx.fillStyle = CREAM; ctx.textAlign = 'center';
+    ctx.fillText('Setas: escolher · Z: comprar · X: inventário · C: trocar herói · Esc: voltar', 664, 498);
+  }
+}
+
+// ---------- Inventário: equipar 2 armas e 1 amuleto por herói ----------
+class Inventory {
+  // onDone: o que fazer ao sair; fight: se não for nulo, mostra o botão "Lutar!" (equipar antes da luta)
+  constructor(onDone, fight) {
+    this.onDone = onDone; this.fight = fight; this.t = 0; this.row = fight ? 3 : 0; this.picker = null; this.msg = '';
+    this.heroes = Net.connected ? [Net.myHero] : ['fosforo', 'candela'];
+    this.hi = Math.max(0, this.heroes.indexOf(Game.mode.chars[0])); Music.play('shop');
+  }
+  hero() { return this.heroes[this.hi]; }
+  rows() { return ['weapon', 'weapon2', 'charm'].concat(this.fight ? ['go'] : []); }
+  options(slot) {
+    // armas: padrão (faíscas) + armas obtidas; amuleto: vazio + amuletos obtidos
+    if (slot === 'charm') return [null, ...ITEMS.filter((i) => i.type === 'charm' && owns(i.id)).map((i) => i.id)];
+    return [null, ...ITEMS.filter((i) => i.type === 'weapon' && owns(i.id)).map((i) => i.id)];
+  }
+  close(go) {
+    Save.write();
+    if (Net.connected && Net.role === 'guest') Net.send({ t: 'loadout', loadout: loadoutOf(Net.myHero) });
+    this.onDone(go);
+  }
+  update(dt) {
+    this.t += dt;
+    const lo = loadoutOf(this.hero()), rows = this.rows();
+    if (this.picker) {
+      const P = this.picker, opts = this.options(P.slot);
+      if (pressed.up) { P.i = (P.i + opts.length - 1) % opts.length; Snd.play('select'); }
+      if (pressed.down) { P.i = (P.i + 1) % opts.length; Snd.play('select'); }
+      if (backPressed()) { this.picker = null; return; }
+      if (pressed.jump || pressed.start) {
+        const id = opts[P.i];
+        if (P.slot !== 'charm' && id) { const other = P.slot === 'weapon' ? 'weapon2' : 'weapon'; if (lo[other] === id) lo[other] = lo[P.slot]; }  // trocar de lugar
+        lo[P.slot] = id; Snd.play('parry'); this.picker = null; Save.write();
+        this.msg = id ? `${ITEM_BY_ID[id].name} equipado!` : 'Espaço liberado.';
+      }
+      return;
+    }
+    if (pressed.up) { this.row = (this.row + rows.length - 1) % rows.length; Snd.play('select'); }
+    if (pressed.down) { this.row = (this.row + 1) % rows.length; Snd.play('select'); }
+    if ((pressed.left || pressed.right) && this.heroes.length > 1) { this.hi ^= 1; Snd.play('select'); }
+    if (backPressed()) { Snd.play('confirm'); this.close(false); return; }
+    if (pressed.jump || pressed.start) {
+      const r = rows[this.row];
+      if (r === 'go') { Snd.play('confirm'); this.close(true); return; }
+      const opts = this.options(r);
+      if (opts.length === 1 && r !== 'charm') this.msg = 'Você ainda não tem outras armas. Visite a loja!';
+      else if (opts.length === 1) this.msg = 'Você ainda não tem amuletos. Visite a loja!';
+      else { this.picker = { slot: r, i: Math.max(0, opts.indexOf(lo[r])) }; Snd.play('confirm'); }
+    }
+  }
+  statBars(id, x, y) {
+    const st = WEAPON_STATS[id || 'spark']; if (!st) return;
+    Object.entries(st).forEach(([k, v], i) => {
+      ctx.font = `13px ${FONT_TEXT}`; ctx.fillStyle = INK; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(k, x, y + i * 22);
+      for (let b = 0; b < 5; b++) { ink(2); rrect(x + 90 + b * 22, y + i * 22 - 7, 18, 14, 3, b < v ? '#c8352b' : 'rgba(26,20,16,.12)'); }
+    });
+  }
+  draw() {
+    const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#5a3420'); g.addColorStop(1, '#3a2014'); ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = 'rgba(255,220,170,.05)'; for (let x = 0; x < W; x += 48) ctx.fillRect(x, 0, 24, H);
+    outlinedText('INVENTÁRIO', W / 2, 44, 38, '#ffd84a');
+    const hero = this.hero(), lo = loadoutOf(hero), rows = this.rows();
+    // retrato do herói
+    ink(5); rrect(40, 80, 250, 360, 16, PAPER);
+    ctx.save(); ctx.beginPath(); ctx.rect(46, 86, 238, 348); ctx.clip();
+    ctx.fillStyle = hero === 'candela' ? '#b9d4ee' : '#f0c4a8'; ctx.fillRect(40, 80, 250, 360);
+    drawHero(hero, 165, 400, { scale: 2.4, t: this.t, dance: this.picker !== null }); ctx.restore();
+    outlinedText(HEROES[hero].name, 165, 110, 28, hero === 'candela' ? '#3a6fb0' : '#c8352b');
+    if (this.heroes.length > 1) { ctx.font = `14px ${FONT_TEXT}`; ctx.fillStyle = CREAM; ctx.textAlign = 'center'; ctx.fillText('◄ ► trocar herói', 165, 462); }
+    // espaços
+    const labels = { weapon: 'Arma 1', weapon2: 'Arma 2', charm: 'Amuleto' };
+    rows.forEach((r, i) => {
+      const y = 90 + i * 98, sel = i === this.row && !this.picker;
+      if (r === 'go') {
+        ink(sel ? 6 : 4); rrect(310, y, 300, 70, 14, sel ? '#c8352b' : '#8a3a30');
+        outlinedText('▶ Lutar!', 460, y + 36, 32, CREAM); return;
+      }
+      ink(sel ? 6 : 4); rrect(310, y, 300, 86, 14, sel ? '#fff6e0' : '#cdb98e');
+      ctx.font = `13px ${FONT_TEXT}`; ctx.fillStyle = 'rgba(26,20,16,.65)'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle'; ctx.fillText(labels[r].toUpperCase() + (r === 'weapon' ? '  (inicial)' : ''), 326, y + 20);
+      const id = lo[r];
+      ink(3); circle(352, y + 52, 24, '#fff'); drawItemIcon(id || (r === 'charm' ? null : 'spark'), 352, y + 53, 0.62, this.t);
+      ctx.font = `17px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.fillText(id ? ITEM_BY_ID[id].name : (r === 'charm' ? 'Vazio' : 'Faíscas (padrão)'), 388, y + 52);
+      if (sel) { ctx.font = `12px ${FONT_TEXT}`; ctx.fillStyle = '#c8352b'; ctx.fillText('Z: trocar', 388, y + 72); }
+    });
+    // detalhe do item em foco
+    ink(5); rrect(630, 80, 290, 360, 16, PAPER);
+    let focus = null, slot = rows[this.row];
+    if (this.picker) focus = this.options(this.picker.slot)[this.picker.i]; else if (slot !== 'go') focus = lo[slot];
+    const isW = this.picker ? this.picker.slot !== 'charm' : slot === 'weapon' || slot === 'weapon2';
+    ctx.font = `20px ${FONT_TITLE}`; ctx.fillStyle = INK; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (slot === 'go' && !this.picker) { ctx.font = `15px ${FONT_TEXT}`; ctx.fillText('Tudo pronto?', 775, 140); }
+    else {
+      drawItemIcon(focus || (isW ? 'spark' : null), 775, 135, 1.3, this.t);
+      ctx.fillText(focus ? ITEM_BY_ID[focus].name : (isW ? 'Faíscas (padrão)' : 'Nenhum amuleto'), 775, 200);
+      textBlock(focus ? ITEM_BY_ID[focus].desc : (isW ? 'O tiro de sempre: rápido e reto. Dá para trocar entre duas armas durante a luta (tecla Q ou botão TROCA).' : 'Sem amuleto equipado.'), 650, 226, 250, 20, 14, INK, 'left');
+      if (isW) this.statBars(focus, 652, 340);
+    }
+    // seletor de itens
+    if (this.picker) {
+      const opts = this.options(this.picker.slot);
+      ctx.fillStyle = 'rgba(15,8,4,.5)'; ctx.fillRect(300, 70, 320, 380);
+      ink(5); rrect(310, 80, 300, 360, 14, PAPER);
+      outlinedText(this.picker.slot === 'charm' ? 'Amuletos' : 'Armas', 460, 108, 24, '#c8352b');
+      opts.forEach((id, i) => {
+        const sel = i === this.picker.i, y = 138 + i * 40;
+        if (y > 410) return;
+        if (sel) { ctx.fillStyle = 'rgba(200,53,43,.16)'; ctx.fillRect(318, y - 18, 284, 36); }
+        if (id) drawItemIcon(id, 344, y + 1, 0.32, this.t); else if (this.picker.slot !== 'charm') drawItemIcon('spark', 344, y + 1, 0.32, this.t);
+        ctx.font = `16px ${FONT_TITLE}`; ctx.fillStyle = sel ? '#c8352b' : INK; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText((sel ? '► ' : '') + (id ? ITEM_BY_ID[id].name : (this.picker.slot === 'charm' ? 'Nenhum' : 'Faíscas (padrão)')), 366, y);
+      });
+    }
+    ctx.font = `14px ${FONT_TEXT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = this.msg ? '#fff6e0' : CREAM; ctx.fillText(this.msg || '↑/↓ escolher espaço · Z trocar item · Esc voltar', W / 2, 500);
   }
 }

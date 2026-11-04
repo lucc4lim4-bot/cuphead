@@ -7,7 +7,7 @@
 
 const NET_PREFIX = 'fosforo-candela-vv-';
 const PEERJS_URL = 'https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js';
-const NET_ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'shoot', 'dash', 'ex', 'lock', 'start', 'pause'];
+const NET_ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'shoot', 'dash', 'ex', 'lock', 'start', 'pause', 'swap'];
 
 const Net = {
   role: null, connected: false, code: '', status: '', peer: null, conn: null, chan: null,
@@ -110,17 +110,17 @@ const Net = {
           this.remoteLoadout = m.loadout || this.remoteLoadout;
           Game.mode = { coop: true, online: true, chars: [this.myHero, otherHero(this.myHero)] };
           InputMode.coop = false;
-          this.send({ t: 'start', chars: Game.mode.chars, diff: opt().diff, save: saveSnapshot() });
-          NetUI.close(); Game.toast('Parceiro conectado! Escolha a fase no mapa.'); Game.go(new MapScene(0));
+          this.send({ t: 'start', chars: Game.mode.chars, diff: curDiffId(), save: saveSnapshot() });
+          NetUI.close(); Game.toast('Parceiro conectado! Escolha a fase no mapa.'); Game.go(MapScene.boss(0));
         }
         break;
       case 'start':
         mergeSave(m.save);
         this.myHero = m.chars[1];
         Game.mode = { coop: true, online: true, chars: m.chars }; InputMode.coop = false;
-        opt().diff = m.diff;
+        Game.diffOverride = m.diff;
         this.send({ t: 'loadout', loadout: loadoutOf(this.myHero) });
-        NetUI.close(); Game.toast(`Conectado! Você é ${HEROES[this.myHero].name}.`); Game.go(new MapScene(0));
+        NetUI.close(); Game.toast(`Conectado! Você é ${HEROES[this.myHero].name}.`); Game.go(MapScene.boss(0));
         break;
       case 'loadout': this.remoteLoadout = m.loadout || this.remoteLoadout; break;
       case 'save': mergeSave(m.save); break;
@@ -132,14 +132,14 @@ const Net = {
       case 'mapsel': if (this.role === 'guest' && Game.scene instanceof MapScene) Game.scene.sel = m.sel; break;
       case 'fight':
         if (this.role !== 'guest') break;
-        opt().diff = m.diff; Game.mode = { coop: true, online: true, chars: m.chars };
+        Game.diffOverride = m.diff; Game.mode = { coop: true, online: true, chars: m.chars };
         Game.go(new NetView(m.idx));
         break;
       case 'snap': if (this.role === 'guest' && (!this.snap || m.n > this.snap.n || m.n < 10)) this.snap = m; break;
       case 'results':
-        if (this.role === 'guest') { opt().diff = m.diff; Game.go(new Results(m.idx, m.stats, m.hp, m.diff)); }
+        if (this.role === 'guest') { Game.diffOverride = m.diff; Game.go(new Results(m.idx, m.stats, m.hp, m.diff)); }
         break;
-      case 'map': if (this.role === 'guest' && !(Game.scene instanceof Shop) && !(Game.scene instanceof Results)) Game.go(new MapScene(m.sel - 1)); break;
+      case 'map': if (this.role === 'guest' && !(Game.scene instanceof Shop) && !(Game.scene instanceof Inventory) && !(Game.scene instanceof Results)) Game.go(new MapScene(m.sel)); break;
       case 'bye': this.onClose(); break;
     }
   },
@@ -163,17 +163,26 @@ const otherHero = (h) => (h === 'fosforo' ? 'candela' : 'fosforo');
 // ---------- save em conjunto ----------
 function saveSnapshot() {
   const d = Save.data;
-  return { grades: d.grades, gradeDiff: d.gradeDiff || {}, coins: d.coins, owned: d.owned, seenIntro: d.seenIntro };
+  return { grades: d.grades, gradeDiff: d.gradeDiff || {}, earned: d.earned, owned: d.owned, seenIntro: d.seenIntro, rg: d.rg || {} };
 }
+// Junta o save do parceiro: melhores notas, mais moedas GANHAS (as gastas vêm dos itens de cada um)
+// e todos os itens comprados. Assim ninguém recupera moedas já gastas ao reconectar.
 function mergeSave(r) {
   if (!r) return;
   const d = Save.data, gd = d.gradeDiff || (d.gradeDiff = {});
   for (const [id, g] of Object.entries(r.grades || {})) {
     if (!d.grades[id] || GRADE_ORDER.indexOf(g) > GRADE_ORDER.indexOf(d.grades[id])) { d.grades[id] = g; gd[id] = (r.gradeDiff || {})[id] || 'normal'; }
   }
-  d.coins = Math.max(d.coins || 0, r.coins || 0);
+  d.earned = Math.max(d.earned || 0, r.earned || 0);
   d.owned = [...new Set([...(d.owned || []), ...(r.owned || [])])];
   d.seenIntro = d.seenIntro || !!r.seenIntro;
+  d.rg = d.rg || {};
+  for (const [id, v] of Object.entries(r.rg || {})) {      // moedas de Run 'n' Gun já pegas, por nível
+    const mine = d.rg[id] || (d.rg[id] = { got: [], done: false });
+    (v.got || []).forEach((g, i) => { if (g) mine.got[i] = true; });
+    mine.done = mine.done || !!v.done;
+  }
+  recalcCoins(); shopSanitize();
   Save.write();
 }
 
