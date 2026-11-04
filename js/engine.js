@@ -16,37 +16,84 @@ const rand = (a, b) => a + Math.random() * (b - a);
 const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 const ease = (t) => t * t * (3 - 2 * t);
 
-// ---------- Armazenamento (com proteção) ----------
+// ---------- Armazenamento: configurações do aparelho + 3 slots de save ----------
+// Configurações (volume, teclas, botões) ficam no aparelho; o progresso (notas, moedas,
+// itens, dificuldade) fica no slot escolhido. Tudo protegido contra armazenamento bloqueado.
+const SLOT_COUNT = 3;
+const PROGRESS_KEYS = ['grades', 'gradeDiff', 'best', 'seenIntro', 'earned', 'coins', 'owned', 'loadout', 'shop', 'diff', 'created', 'updated', 'rg'];
 const Save = {
-  data: { grades: {}, seenIntro: false, muted: false, binds: {}, opt: {} },
-  load() { try { const s = localStorage.getItem('fosforo-save'); if (s) Object.assign(this.data, JSON.parse(s)); } catch (e) {} },
-  write() { try { localStorage.setItem('fosforo-save', JSON.stringify(this.data)); } catch (e) {} },
+  data: { muted: false, binds: {}, opt: {} },   // configurações + progresso do slot ativo, juntos
+  slot: 0, legacy: null,
+  _get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  _set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* sem armazenamento */ } },
+  _del(k) { try { localStorage.removeItem(k); } catch (e) { /* ok */ } },
+  loadSettings() {
+    const s = this._get('fc-settings');
+    if (s) { try { Object.assign(this.data, JSON.parse(s)); } catch (e) { /* ignora */ } return; }
+    const old = this._get('fosforo-save');            // save antigo (arquivo único)
+    if (old) { try { this.legacy = JSON.parse(old); } catch (e) { /* ignora */ } }
+    if (this.legacy) for (const k of ['muted', 'binds', 'opt']) if (this.legacy[k] !== undefined) this.data[k] = this.legacy[k];
+  },
+  blankProgress(diff) { return { grades: {}, gradeDiff: {}, best: {}, seenIntro: false, earned: 4, owned: [], loadout: {}, shop: null, diff, rg: {}, created: Date.now() }; },
+  slotInfo(n) { const s = this._get('fc-slot-' + n); if (!s) return null; try { return JSON.parse(s); } catch (e) { return null; } },
+  bootSlot() {
+    if (this.legacy && !this.slotInfo(1)) {            // migra o save antigo para o slot 1
+      const l = this.legacy, p = this.blankProgress((l.opt && l.opt.diff) || 'normal');
+      for (const k of ['grades', 'gradeDiff', 'seenIntro', 'owned', 'loadout']) if (l[k] !== undefined) p[k] = l[k];
+      delete p.earned; p.coins = l.coins || 0;          // 'earned' é recalculado em afterSlotLoad
+      if (Object.keys(p.grades || {}).length && !(p.owned || []).includes('w_fan')) (p.owned = p.owned || []).push('w_fan'); // a Candela perdeu o leque de base: ganha o item
+      this._set('fc-slot-1', JSON.stringify(p)); this._set('fc-active', '1');
+    }
+    const n = parseInt(this._get('fc-active') || '0', 10);
+    return !!(n && this.slotInfo(n) && this.loadSlot(n));
+  },
+  clearProgress() { for (const k of PROGRESS_KEYS) delete this.data[k]; },
+  loadSlot(n) {
+    const d = this.slotInfo(n); if (!d) return false;
+    this.clearProgress(); Object.assign(this.data, d); this.slot = n; this._set('fc-active', String(n));
+    if (typeof afterSlotLoad === 'function') afterSlotLoad();
+    return true;
+  },
+  createSlot(n, diff) {
+    this.clearProgress(); Object.assign(this.data, this.blankProgress(diff)); this.slot = n; this._set('fc-active', String(n));
+    if (typeof afterSlotLoad === 'function') afterSlotLoad();
+    this.write();
+  },
+  deleteSlot(n) { this._del('fc-slot-' + n); if (this.slot === n) { this.slot = 0; this.clearProgress(); this._del('fc-active'); } },
+  write() {
+    const set = {}, prog = {};
+    for (const k in this.data) (PROGRESS_KEYS.includes(k) ? prog : set)[k] = this.data[k];
+    this._set('fc-settings', JSON.stringify(set));
+    if (this.slot) { prog.updated = Date.now(); this._set('fc-slot-' + this.slot, JSON.stringify(prog)); }
+  },
 };
-Save.load();
+Save.loadSettings();
 // Níveis de dificuldade
 const DIFFS = {
-  easy: { name: 'Fácil', color: '#2f8a4a', lives: 5, hp: 0.62, cd: 1.55, speed: 0.78, maxGrade: 'B', desc: '5 PV · chefões bem mais fracos e lentos · nota máxima B' },
-  normal: { name: 'Normal', color: '#3a6fb0', lives: 4, hp: 0.85, cd: 1.15, speed: 0.92, desc: '4 PV · o desafio pensado para o jogo' },
-  hard: { name: 'Difícil', color: '#c8352b', lives: 3, hp: 1.1, cd: 0.9, speed: 1.05, desc: '3 PV · chefões mais resistentes, rápidos e agressivos' },
-  nightmare: { name: 'Pesadelo', color: '#6a2a8a', lives: 1, hp: 1.3, cd: 0.78, speed: 1.15, desc: '1 PV · um toque e acabou. Boa sorte!' },
+  easy: { name: 'Fácil', color: '#2f8a4a', lives: 5, hp: 0.95, cd: 2.05, speed: 0.74, maxGrade: 'B', desc: '5 PV · chefões lentos e mais fracos · nota máxima B' },
+  normal: { name: 'Normal', color: '#3a6fb0', lives: 4, hp: 1.28, cd: 1.55, speed: 0.85, desc: '4 PV · o desafio pensado para o jogo' },
+  hard: { name: 'Difícil', color: '#c8352b', lives: 3, hp: 1.65, cd: 1.2, speed: 0.97, desc: '3 PV · chefões mais resistentes e mais agressivos' },
+  nightmare: { name: 'Pesadelo', color: '#6a2a8a', lives: 1, hp: 1.95, cd: 1.05, speed: 1.06, desc: '1 PV · um toque e acabou. Boa sorte!' },
 };
 const DIFF_ORDER = ['easy', 'normal', 'hard', 'nightmare'];
-const OPT_DEFAULTS = { bossBar: true, dir: 'stick', diff: 'normal', music: 7, sfx: 8, shake: true, film: true, touch: 'auto', tOpacity: 0.55, tScale: 1, tPos: {} };
+const OPT_DEFAULTS = { bossBar: true, dir: 'stick', music: 7, sfx: 8, shake: true, film: true, touch: 'auto', tOpacity: 0.55, tScale: 1, tPos: {} };
 Save.data.opt = Object.assign({}, OPT_DEFAULTS, Save.data.opt || {});
 const opt = () => Save.data.opt;
-const curDiff = () => DIFFS[opt().diff] || DIFFS.normal;
-function cycleDiff(d) { const i = DIFF_ORDER.indexOf(opt().diff); opt().diff = DIFF_ORDER[(Math.max(0, i) + d + DIFF_ORDER.length) % DIFF_ORDER.length]; Save.write(); }
+// A dificuldade é travada por save: só dá para BAIXAR (a nota máxima do Fácil segue limitada)
+function curDiffId() { return (typeof Game !== 'undefined' && Game.diffOverride) || Save.data.diff || 'normal'; }
+const curDiff = () => DIFFS[curDiffId()] || DIFFS.normal;
+function lowerDiff() { const i = DIFF_ORDER.indexOf(curDiffId()); if (i <= 0) return false; Save.data.diff = DIFF_ORDER[i - 1]; Save.write(); return true; }
 
 // ---------- Entrada (até 2 jogadores: teclado dividido e controles) ----------
 const keys = {}, pressed = {};                       // união de todos (usado nos menus)
 const PIN = [{ held: {}, pressed: {} }, { held: {}, pressed: {} }]; // por jogador
 const InputMode = { coop: false };
-const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'shoot', 'dash', 'ex', 'lock'];
-const ACTION_NAMES = { left: 'Esquerda', right: 'Direita', up: 'Cima / mirar', down: 'Baixo / agachar', jump: 'Pular / rebater', shoot: 'Atirar', dash: 'Dash', ex: 'EX / Super', lock: 'Travar mira' };
+const ACTIONS = ['left', 'right', 'up', 'down', 'jump', 'shoot', 'dash', 'ex', 'lock', 'swap'];
+const ACTION_NAMES = { left: 'Esquerda', right: 'Direita', up: 'Cima / mirar', down: 'Baixo / agachar', jump: 'Pular / rebater', shoot: 'Atirar', dash: 'Dash', ex: 'EX / Super', lock: 'Travar mira', swap: 'Trocar arma' };
 const DEFAULT_BINDS = {
-  solo: { left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'], up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], jump: ['KeyZ', 'Space', 'KeyJ'], shoot: ['KeyX', 'KeyK'], dash: ['KeyC', 'KeyL'], ex: ['KeyV', 'KeyI'], lock: ['ShiftLeft', 'ShiftRight'] },
-  p1: { left: ['KeyA'], right: ['KeyD'], up: ['KeyW'], down: ['KeyS'], jump: ['KeyF', 'Space'], shoot: ['KeyG'], dash: ['KeyH'], ex: ['KeyR'], lock: ['KeyQ', 'ShiftLeft'] },
-  p2: { left: ['ArrowLeft'], right: ['ArrowRight'], up: ['ArrowUp'], down: ['ArrowDown'], jump: ['Numpad1', 'Comma'], shoot: ['Numpad2', 'Period'], dash: ['Numpad3', 'Slash', 'IntlRo'], ex: ['Numpad0', 'KeyL'], lock: ['NumpadDecimal', 'ShiftRight'] },
+  solo: { left: ['ArrowLeft', 'KeyA'], right: ['ArrowRight', 'KeyD'], up: ['ArrowUp', 'KeyW'], down: ['ArrowDown', 'KeyS'], jump: ['KeyZ', 'Space', 'KeyJ'], shoot: ['KeyX', 'KeyK'], dash: ['KeyC', 'KeyL'], ex: ['KeyV', 'KeyI'], lock: ['ShiftLeft', 'ShiftRight'], swap: ['KeyQ', 'KeyB'] },
+  p1: { left: ['KeyA'], right: ['KeyD'], up: ['KeyW'], down: ['KeyS'], jump: ['KeyF', 'Space'], shoot: ['KeyG'], dash: ['KeyH'], ex: ['KeyR'], lock: ['KeyQ', 'ShiftLeft'], swap: ['KeyT'] },
+  p2: { left: ['ArrowLeft'], right: ['ArrowRight'], up: ['ArrowUp'], down: ['ArrowDown'], jump: ['Numpad1', 'Comma'], shoot: ['Numpad2', 'Period'], dash: ['Numpad3', 'Slash', 'IntlRo'], ex: ['Numpad0', 'KeyL'], lock: ['NumpadDecimal', 'ShiftRight'], swap: ['Numpad5', 'Semicolon'] },
 };
 const RESERVED_KEYS = ['Enter', 'NumpadEnter', 'Escape', 'KeyP', 'KeyM', 'Tab'];
 function getBinds(profile) { return Object.assign({}, DEFAULT_BINDS[profile], (Save.data.binds || {})[profile] || {}); }
@@ -122,7 +169,7 @@ const Pads = {
       const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
       const want = {
         left: ax < -0.4 || b(14), right: ax > 0.4 || b(15), up: ay < -0.5 || b(12), down: ay > 0.5 || b(13),
-        jump: b(0), shoot: b(2) || b(7), ex: b(1) || b(3), dash: b(5) || b(4), lock: b(6), pause: b(9),
+        jump: b(0), shoot: b(2) || b(7), ex: b(1), swap: b(3), dash: b(5) || b(4), lock: b(6), pause: b(9),
       };
       const st = this.state[gi];
       for (const a in want) {
@@ -138,7 +185,7 @@ const Pads = {
 // ---------- Controles de toque (posição, tamanho e opacidade configuráveis) ----------
 const TOUCH_DEFAULT_POS = {
   up: [13, 63], left: [6, 79], right: [20, 79], down: [13, 93],
-  stick: [13, 76], lock: [70, 92], shoot: [82, 86], jump: [93, 78], dash: [82, 66], ex: [93, 58], pause: [96, 8],
+  stick: [13, 76], swap: [69, 70], lock: [70, 92], shoot: [82, 86], jump: [93, 78], dash: [82, 66], ex: [93, 58], pause: [96, 8],
 };
 const capture = (el, id) => { try { el.setPointerCapture(id); } catch (e) { /* ponteiro já liberado */ } };
 const DIR_NAMES = { stick: 'Joystick fixo', float: 'Joystick flutuante', pad: 'Setas' };
@@ -382,8 +429,8 @@ function shape(path, fill, lw = 4, shadeCol, sdx, sdy) {
   if (shadeCol !== false) shade(path, shadeCol || 'rgba(70,30,10,.25)', sdx ?? -7, sdy ?? -7);
   ink(lw); ctx.beginPath(); path(); ctx.stroke();
 }
-function groundShadow(x, w, a = 0.35) {
-  ctx.beginPath(); ctx.ellipse(x, GY + 3, w, w * 0.18, 0, 0, TAU); ctx.fillStyle = `rgba(20,10,4,${a})`; ctx.fill();
+function groundShadow(x, w, a = 0.35, y = GY) {
+  ctx.beginPath(); ctx.ellipse(x, y + 3, w, w * 0.18, 0, 0, TAU); ctx.fillStyle = `rgba(20,10,4,${a})`; ctx.fill();
 }
 function outlinedText(text, x, y, size, fill = CREAM, font = FONT_TITLE, align = 'center', lw = 0) {
   ctx.font = `${size}px ${font}`; ctx.textAlign = align; ctx.textBaseline = 'middle';

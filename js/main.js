@@ -2,14 +2,14 @@
 // ===== Laço principal =====
 const Game = {
   scene: null,
-  toastMsg: '', toastT: 0,
+  toastMsg: '', toastT: 0, diffOverride: null,
   toast(m) { this.toastMsg = m; this.toastT = 3.5; },
   mode: { coop: false, chars: ['fosforo'] },
   fade: 0, next: null,
   go(scene) { this.next = scene; this.fade = 0.0001; },
   start() {
     Film.init(); buildBackgrounds();
-    this.scene = new Title();
+    this.scene = Save.bootSlot() ? new Title() : new SlotSelect(true);
     let last = performance.now(), acc = 0;
     const STEP = 1 / 60;
     const frame = (now) => {

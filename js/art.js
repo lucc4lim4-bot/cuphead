@@ -4,12 +4,12 @@
 const HEROES = {
   fosforo: {
     name: 'Fósforo', tag: 'O palito destemido',
-    weapon: 'Faíscas', desc: 'Tiro rápido e reto, de longo alcance.',
+    weapon: 'Faíscas', desc: 'Rebate o rosa com o pulo no ar e quica nele para ganhar altura.',
     flame: ['#d8341c', '#ff8a1e', '#ffe56a'], shoe: '#3b2416',
   },
   candela: {
     name: 'Candela', tag: 'A velinha valente',
-    weapon: 'Leque de Cera', desc: 'Três gotas em leque: alcance curto, dano alto de perto.',
+    weapon: 'Faíscas azuis', desc: 'Pulo duplo de base. Rebate o rosa com o DASH (e o dash continua livre).',
     flame: ['#2a6fd0', '#6fd3ff', '#effcff'], shoe: '#3a1f4a',
   },
 };

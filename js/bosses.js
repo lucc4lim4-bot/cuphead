@@ -4,14 +4,17 @@
 const BULLET_ART = {}; // artes extras registradas por outros arquivos
 
 function makeBullet(o) {
-  return Object.assign({ x: 0, y: 0, vx: 0, vy: 0, ay: 0, r: 12, pink: false, life: 12, t: 0, kind: 'ball', rot: 0 }, o);
+  const b = Object.assign({ x: 0, y: 0, vx: 0, vy: 0, ay: 0, r: 12, pink: false, life: 12, t: 0, kind: 'ball', rot: 0 }, o);
+  b.pink = false; // quem decide se é rosa é o saco de rosas da luta (Fight.gatePink)
+  return b;
 }
 
 function updateBullet(b, dt, f) {
   b.t += dt; b.life -= dt;
   if (b.upd) b.upd(b, dt, f);
   else { b.vy += b.ay * dt; b.x += b.vx * dt; b.y += b.vy * dt; }
-  if (b.x < -260 || b.x > W + 260 || b.y > H + 200 || b.y < -400) b.life = 0;
+  const cx = f.camX || 0;
+  if (b.x < cx - 260 || b.x > cx + W + 260 || b.y > H + 200 || b.y < -400) b.life = 0;
 }
 
 // colisão do projétil com uma caixa
